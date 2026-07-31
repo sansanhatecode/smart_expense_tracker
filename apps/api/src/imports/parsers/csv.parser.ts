@@ -6,11 +6,6 @@ import type { BankProfile, ParseResult, StatementParser, UploadedFile } from '..
 export class CsvParser implements StatementParser {
   readonly source: ImportSource = 'csv';
 
-  supports(file: UploadedFile): boolean {
-    if (/\.csv$/i.test(file.originalName)) return true;
-    // Nhiều nơi trả text/plain cho .csv nên không tin mimeType một mình.
-    return file.mimeType === 'text/csv' || file.mimeType === 'application/csv';
-  }
 
   parse(file: UploadedFile, profile: BankProfile): Promise<ParseResult> {
     const text = decodeCsv(file.buffer);

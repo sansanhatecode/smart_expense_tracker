@@ -15,13 +15,6 @@ import type { BankProfile, ParseResult, StatementParser, UploadedFile } from '..
 export class XlsxParser implements StatementParser {
   readonly source: ImportSource = 'xlsx';
 
-  supports(file: UploadedFile): boolean {
-    if (/\.xlsx$/i.test(file.originalName)) return true;
-    return (
-      file.mimeType ===
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-  }
 
   async parse(file: UploadedFile, profile: BankProfile): Promise<ParseResult> {
     const table = await readFirstSheet(file.buffer);

@@ -20,6 +20,7 @@ import type {
 import { AUTO_DETECT_CANDIDATES, findProfile } from './bank-profiles';
 import { categorize, type CategorizerRule } from './categorizer';
 import { assignSequences, computeDedupeHash } from './dedupe';
+import { detectFormat, explainUnsupported } from './detect-format';
 import { normalize } from './normalizer';
 import { CsvParser } from './parsers/csv.parser';
 import { XlsxParser } from './parsers/xlsx.parser';
@@ -71,12 +72,7 @@ export class ImportsService {
   ): Promise<ImportPreviewDto> {
     this.assertFileAcceptable(file);
 
-    const parser = this.parsers.find((candidate) => candidate.supports(file));
-    if (!parser) {
-      throw new UnsupportedMediaTypeException(
-        'Chỉ hỗ trợ file .csv và .xlsx. File .pdf chưa được hỗ trợ.',
-      );
-    }
+    const parser = this.pickParser(file);
 
     const { result, profile } = await this.parseWithProfile(parser, file, bankProfileId);
 
@@ -364,6 +360,34 @@ export class ImportsService {
 
   // ─── Nội bộ ────────────────────────────────────────────────────────────────
 
+  /**
+   * Chọn parser theo NỘI DUNG file, không theo đuôi tên.
+   *
+   * Đuôi file là thứ người dùng hoặc ngân hàng đặt, không phải thứ mô tả nội
+   * dung — spec §4 nói phải sniff nội dung, và đây là chỗ làm việc đó. Trước khi
+   * có hàm này, một file .xls đặt tên .xlsx đi thẳng vào XlsxParser, thư viện ném
+   * lỗi ở tầng sâu, và người dùng nhận 500 trong khi họ thấy đuôi .xlsx trên máy.
+   *
+   * Tác dụng phụ tử tế: file CSV đặt tên .xlsx vẫn import được.
+   */
+  private pickParser(file: UploadedFile): StatementParser {
+    const format = detectFormat(file.buffer);
+
+    if (format === 'xlsx') {
+      const parser = this.parsers.find((candidate) => candidate.source === 'xlsx');
+      if (parser) return parser;
+    }
+
+    if (format === 'text') {
+      const parser = this.parsers.find((candidate) => candidate.source === 'csv');
+      if (parser) return parser;
+    }
+
+    // Định dạng nhận ra được nhưng không đọc được → 415 kèm cách sửa cụ thể.
+    // Đây là lỗi của input, không phải lỗi hệ thống, nên không được là 500.
+    throw new UnsupportedMediaTypeException(explainUnsupported(format, file.originalName));
+  }
+
   private assertFileAcceptable(file: UploadedFile): void {
     if (file.size === 0) {
       throw new BadRequestException('File rỗng');
@@ -394,14 +418,14 @@ export class ImportsService {
       if (!profile) {
         throw new BadRequestException(`Không có profile ngân hàng "${bankProfileId}"`);
       }
-      return { result: await parser.parse(file, profile), profile };
+      return { result: await this.runParser(parser, file, profile), profile };
     }
 
     let best: { result: Awaited<ReturnType<StatementParser['parse']>>; profile: BankProfile } | null =
       null;
 
     for (const profile of AUTO_DETECT_CANDIDATES) {
-      const result = await parser.parse(file, profile);
+      const result = await this.runParser(parser, file, profile);
       if (!best || result.rows.length > best.result.rows.length) {
         best = { result, profile };
       }
@@ -414,6 +438,33 @@ export class ImportsService {
     }
 
     return best;
+  }
+
+  /**
+   * Gọi parser và biến lỗi của thư viện thành lỗi 4xx có nghĩa.
+   *
+   * `detectFormat` đã chặn phần lớn trường hợp, nhưng một file .xlsx hợp chữ ký
+   * mà bên trong bị hỏng vẫn làm thư viện ném lỗi. Đó là lỗi của FILE, không phải
+   * lỗi hệ thống — để nó rơi xuống 500 thì người dùng nhận stack trace và không
+   * biết phải làm gì, còn log thì đầy "lỗi" mà không có gì cần sửa ở phía ta.
+   */
+  private async runParser(
+    parser: StatementParser,
+    file: UploadedFile,
+    profile: BankProfile,
+  ): Promise<Awaited<ReturnType<StatementParser['parse']>>> {
+    try {
+      return await parser.parse(file, profile);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Không parse được "${file.originalName}": ${detail}`);
+
+      throw new BadRequestException(
+        `Không đọc được nội dung "${file.originalName}". ` +
+          `File có thể bị hỏng hoặc không phải bảng tính hợp lệ. ` +
+          `Thử mở bằng Excel rồi lưu lại dưới dạng .xlsx hoặc .csv.`,
+      );
+    }
   }
 
   /**

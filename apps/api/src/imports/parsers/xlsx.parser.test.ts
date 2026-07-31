@@ -26,13 +26,6 @@ function fixture(): UploadedFile {
 }
 
 describe('XlsxParser', () => {
-  it('nhận file .xlsx theo đuôi và theo mimeType', () => {
-    expect(parser.supports(fixture())).toBe(true);
-    expect(
-      parser.supports({ ...fixture(), originalName: 'a.txt', mimeType: 'text/plain' }),
-    ).toBe(false);
-  });
-
   it('đọc được sao kê .xlsx thật, bỏ đúng phần tiêu đề và dòng tổng', async () => {
     const result = await parser.parse(fixture(), GENERIC_PROFILE);
 

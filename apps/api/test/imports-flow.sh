@@ -148,12 +148,43 @@ check "batch pending bị xoá khỏi lịch sử" \
 check "Transaction không đổi" "$(txTotal "$TOKEN")" "5"
 
 echo "── 9. Validate file & cô lập user ─────────────────────────────────────────"
+# Định dạng nhận bằng NỘI DUNG, không bằng đuôi file (spec §4).
+# Nội dung là text → vẫn thử parse như CSV, nên lỗi là "không có hàng tiêu đề"
+# (400, vấn đề nội dung) chứ không phải "định dạng không hỗ trợ" (415).
 echo "khong phai csv" > "$TMP/rac.txt"
-check "file .txt → 415" "$(code "$(upload "$TOKEN" "$TMP/rac.txt")")" "415"
+check "file .txt (là text) → thử parse như CSV → 400" \
+  "$(code "$(upload "$TOKEN" "$TMP/rac.txt")")" "400"
 printf 'a,b,c\n1,2,3\n' > "$TMP/khong-header.csv"
 check "csv không có header nhận ra được → 400" "$(code "$(upload "$TOKEN" "$TMP/khong-header.csv")")" "400"
 : > "$TMP/rong.csv"
 check "file rỗng → 400" "$(code "$(upload "$TOKEN" "$TMP/rong.csv")")" "400"
+
+# Hồi quy cho một lỗi gặp thật: ngân hàng xuất Excel 97-2003 rồi đặt tên .xlsx.
+# Trước khi sniff nội dung, file này đi vào XlsxParser rồi nổ thành 500 + stack trace.
+node -e "
+const fs=require('fs');
+const ole2=Buffer.from([0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1]);
+fs.writeFileSync('$TMP/thuc-ra-la-xls.xlsx', Buffer.concat([ole2, Buffer.alloc(2048)]));
+"
+R=$(upload "$TOKEN" "$TMP/thuc-ra-la-xls.xlsx")
+check "file .xls đặt tên .xlsx → 415, KHÔNG phải 500" "$(code "$R")" "415"
+check "  thông báo nói file thực chất là .xls" \
+  "$(body "$R" | grep -c '\.xls')" "1"
+check "  và nói cách sửa" \
+  "$(body "$R" | grep -cE 'lưu lại|Excel')" "1"
+
+# Chiều ngược lại: CSV đặt tên .xlsx thì vẫn phải import được — sniff nội dung
+# cho ta điều này miễn phí.
+printf 'Ngày,Nội dung,Số tiền\n15/07/2026,QUAN OC CO BA,-88.000\n' > "$TMP/thuc-ra-la-csv.xlsx"
+R=$(upload "$TOKEN" "$TMP/thuc-ra-la-csv.xlsx")
+check "CSV đặt tên .xlsx → vẫn import được" "$(code "$R")" "201"
+check "  và được nhận đúng là nguồn csv" "$(body "$R" | jq_ '.source')" "csv"
+req DELETE "/api/imports/$(body "$R" | jq_ '.batchId')" "$TOKEN" >/dev/null
+
+printf '%%PDF-1.7\ntrailer\n' > "$TMP/sao-ke.pdf"
+R=$(upload "$TOKEN" "$TMP/sao-ke.pdf")
+check "PDF → 415 kèm gợi ý định dạng thay thế" "$(code "$R")" "415"
+check "  gợi ý csv/xlsx" "$(body "$R" | grep -ciE 'csv|xlsx')" "1"
 check "user khác xem preview của mình → 404" "$(code "$(req GET "/api/imports/$B1" "$OTHER_TOKEN")")" "404"
 check "user khác rollback batch của mình → 404" "$(code "$(req DELETE "/api/imports/$B1" "$OTHER_TOKEN")")" "404"
 check "user khác không thấy giao dịch nào" "$(txTotal "$OTHER_TOKEN")" "0"

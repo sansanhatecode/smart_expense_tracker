@@ -98,7 +98,14 @@ export interface UploadedFile {
 
 export interface StatementParser {
   readonly source: ImportSource;
-  supports(file: UploadedFile): boolean;
   /** Async vì thư viện đọc .xlsx là async; CsvParser chỉ trả promise đã resolve. */
   parse(file: UploadedFile, profile: BankProfile): Promise<ParseResult>;
 }
+
+/**
+ * Cố tình KHÔNG có `supports(file)`.
+ *
+ * Phiên bản đầu có, và nó nhận dạng bằng đuôi tên file — nên một file .xls đặt
+ * tên .xlsx đi thẳng vào XlsxParser rồi nổ ở tầng thư viện. Việc nhận định dạng
+ * giờ do `detectFormat` làm, dựa trên magic bytes; parser chỉ còn việc đọc.
+ */

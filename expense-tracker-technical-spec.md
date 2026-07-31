@@ -401,11 +401,29 @@ Bản đầu của ADR này chọn `balance` (số dư sau giao dịch) làm dis
 
 `balance` chia không gian hash làm hai phần rời nhau: dòng từ sao kê có balance, giao dịch nhập tay thì không. Hệ quả cụ thể — người dùng nhập tay "cà phê 25k ngày 15/7", sau đó import sao kê chứa đúng giao dịch đó, và nhận về **hai bản**. Đó là loại trùng dễ thấy nhất và khó hiểu nhất đối với người dùng, vì họ biết rõ mình chỉ uống một ly.
 
-Dùng `seq` cho **cả hai** đường thì chúng chung một không gian hash, và dedupe xuyên được giữa nhập tay và import. Chi tiết công thức ở §4; đã có test cho đúng tình huống này.
+Dùng `seq` cho **cả hai** đường thì chúng chung một không gian hash, và dedupe xuyên được giữa nhập tay và import. Chi tiết công thức ở §4.
+
+### Dedupe là BẤT ĐỐI XỨNG, và đó là chủ ý
+
+Điều này lập luận ban đầu chưa nói chính xác, phát hiện khi viết test e2e:
+
+| Thứ tự | Kết quả |
+| :--- | :--- |
+| Nhập tay trước → import file chứa nó | Dòng import **bị đánh dấu trùng**, mặc định bỏ tick |
+| Import trước → nhập tay bản y hệt | Vẫn **được thêm**, trả 201 |
+
+Chiều thứ hai không phải lỗi. `seq` của bản nhập tay = số dòng đã có cùng khoá, nên nó luôn ra hash mới. Và điều đó **đúng**: nhập tay là ý định tường minh của người dùng, còn chỉ họ mới biết mình uống một hay hai ly cà phê. Chặn một giao dịch người dùng chủ động nhập là sai.
+
+Chiều thứ nhất mới là chiều cần chặn, vì import là đường **tự động và hàng loạt** — đó là nơi trùng lặp xảy ra ngoài ý muốn, và bước preview cho người dùng thấy để quyết định.
+
+Cả hai chiều đều có test e2e (`imports-flow.sh` mục 11).
 
 `balance` vẫn được lưu — chỉ là không tham gia hash. Nó hữu ích để đối chiếu khi nghi parser đọc sai cột.
 
-Nguyên tắc rút ra: discriminator chính xác hơn nhưng **chỉ có ở một nguồn dữ liệu** thì tệ hơn discriminator thô hơn nhưng có ở mọi nguồn.
+Hai nguyên tắc rút ra:
+
+1. Discriminator chính xác hơn nhưng **chỉ có ở một nguồn dữ liệu** thì tệ hơn discriminator thô hơn nhưng có ở mọi nguồn.
+2. Chống trùng nên chặt ở đường tự động và lỏng ở đường thủ công. Người dùng gõ tay đang nói cho hệ thống biết một điều mà hệ thống không tự suy ra được.
 
 ### 9.9. Cold start của Render: biết trước, và có đường thoát
 

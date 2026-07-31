@@ -246,10 +246,15 @@ enum ImportStatus {
   rolled_back
 }
 
-/// Vì sao một dòng staged bị coi là trùng: trùng với dòng khác trong cùng file,
-/// hay trùng với giao dịch đã có trong DB.
+/// Vì sao một dòng staged bị coi là trùng.
+///
+/// Cố tình KHÔNG có giá trị `in_batch`. Với cách tính hash ở ADR 9.8, mỗi dòng
+/// trong cùng một batch nhận `seq` riêng nên không bao giờ trùng hash nhau — và
+/// đó là hành vi đúng: hai dòng giống hệt nhau trong một file sao kê là hai giao
+/// dịch thật (hai ly cà phê cùng ngày), không phải một dòng bị lặp. Trường hợp
+/// file thật sự có dòng lặp do lỗi export thì không thể phân biệt được với hai
+/// giao dịch thật, nên để người dùng bỏ tick ở bước preview.
 enum DuplicateKind {
   none
-  in_batch
   in_db
 }

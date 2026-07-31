@@ -20,6 +20,7 @@ import {
 } from '@expense/shared';
 import type { Request, Response } from 'express';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
+import { env } from '../config/env';
 import { AuthService, type AuthResult } from './auth.service';
 import { CurrentUserId } from './current-user.decorator';
 import { Public } from './jwt-auth.guard';
@@ -35,7 +36,7 @@ export class AuthController {
 
   @Public()
   // Siết chặt hơn mức mặc định của app: đây là chỗ bị brute-force.
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: env.AUTH_THROTTLE_LIMIT, ttl: env.AUTH_THROTTLE_TTL_MS } })
   @Post('register')
   async register(
     @Body(new ZodValidationPipe(registerSchema)) body: RegisterInput,
@@ -47,7 +48,7 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: env.AUTH_THROTTLE_LIMIT, ttl: env.AUTH_THROTTLE_TTL_MS } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(
@@ -66,7 +67,11 @@ export class AuthController {
    * hợp lệ — chính cookie là thứ xác thực ở đây.
    */
   @Public()
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  // Thoáng hơn login/register: FE gọi refresh tự động theo hạn của access token,
+  // đó là hành vi bình thường chứ không phải dấu hiệu brute-force.
+  @Throttle({
+    default: { limit: env.AUTH_THROTTLE_LIMIT * 3, ttl: env.AUTH_THROTTLE_TTL_MS },
+  })
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refresh(

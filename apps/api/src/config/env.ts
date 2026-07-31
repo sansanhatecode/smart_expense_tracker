@@ -35,6 +35,18 @@ const envSchema = z.object({
 
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(4 * 1024 * 1024),
   MAX_IMPORT_ROWS: z.coerce.number().int().positive().default(10_000),
+
+  /**
+   * Rate limit cho route auth. Mặc định 10/phút là mức cho production — đây là
+   * chỗ bị brute-force nên siết chặt hơn phần còn lại của API.
+   *
+   * Cấu hình được qua env vì bộ test e2e chạy nhiều suite liên tiếp, mỗi suite
+   * register vài user, và sẽ luôn vấp giới hạn thật. Nâng nó khi chạy test là
+   * đúng chỗ để giải quyết — thay vì nới giới hạn trong code, hoặc bắt test chờ
+   * hết cửa sổ 60 giây giữa mỗi suite.
+   */
+  AUTH_THROTTLE_LIMIT: z.coerce.number().int().positive().default(10),
+  AUTH_THROTTLE_TTL_MS: z.coerce.number().int().positive().default(60_000),
 });
 
 function parseEnv() {

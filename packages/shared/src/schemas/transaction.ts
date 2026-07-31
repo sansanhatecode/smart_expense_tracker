@@ -8,16 +8,33 @@ import {
 } from '../common';
 import type { CategoryDto } from './category';
 
-export const createTransactionSchema = z.object({
+/**
+ * Field dùng chung cho create và update, KHÔNG mang `.default()`.
+ *
+ * Lý do phải tách ra: `.partial()` chỉ làm key thành optional, còn `ZodDefault`
+ * bên trong vẫn chạy khi key vắng mặt. Nếu update = create.partial() thì
+ * `PATCH {description}` sẽ trả về `{description, categoryId: null, balance: null}`
+ * — tức mỗi lần sửa mô tả là âm thầm xoá danh mục của giao dịch. Đây là bug đã
+ * xảy ra thật, phát hiện qua test.
+ */
+const transactionFields = {
   amount: vndAmountSchema,
   type: txTypeSchema,
   date: dateOnlySchema,
   description: z.string().trim().min(1, 'Vui lòng nhập mô tả').max(500),
-  categoryId: z.string().min(1).nullable().default(null),
-  balance: vndBalanceSchema.nullable().default(null),
+  categoryId: z.string().min(1).nullable(),
+  balance: vndBalanceSchema.nullable(),
+};
+
+export const createTransactionSchema = z.object({
+  ...transactionFields,
+  // Chỉ create mới có default: bỏ trống nghĩa là "chưa phân loại".
+  categoryId: transactionFields.categoryId.default(null),
+  balance: transactionFields.balance.default(null),
 });
 
-export const updateTransactionSchema = createTransactionSchema.partial();
+/** Chỉ những field được gửi lên mới thay đổi. */
+export const updateTransactionSchema = z.object(transactionFields).partial();
 
 export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
 export type UpdateTransactionInput = z.infer<typeof updateTransactionSchema>;

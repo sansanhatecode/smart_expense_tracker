@@ -6,12 +6,14 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { CategoriesModule } from './categories/categories.module';
 import { HealthController } from './health/health.controller';
 import { PrismaModule } from './prisma/prisma.module';
+import { TransactionsModule } from './transactions/transactions.module';
 
 @Module({
   imports: [
     PrismaModule,
     AuthModule,
     CategoriesModule,
+    TransactionsModule,
     // Rate limit mặc định cho toàn API. Route auth siết chặt hơn bằng @Throttle
     // riêng, vì đó là chỗ bị brute-force.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),

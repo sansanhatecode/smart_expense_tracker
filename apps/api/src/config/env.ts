@@ -19,8 +19,15 @@ const envSchema = z.object({
   JWT_ACCESS_SECRET: z
     .string()
     .min(32, 'JWT_ACCESS_SECRET cần ít nhất 32 ký tự (dùng: openssl rand -base64 48)'),
-  /** Định dạng của jsonwebtoken: '15m', '1h', '7d'. */
-  ACCESS_TOKEN_TTL: z.string().min(2).default('15m'),
+  /**
+   * Định dạng của jsonwebtoken: '15m', '1h', '7d'. Regex ở đây là thứ biện minh
+   * cho việc cast sang `SignOptions['expiresIn']` trong AuthModule — kiểu của
+   * jsonwebtoken là template literal nên `string` không gán được.
+   */
+  ACCESS_TOKEN_TTL: z
+    .string()
+    .regex(/^\d+[smhd]$/, "ACCESS_TOKEN_TTL phải có dạng '15m', '1h', '7d'")
+    .default('15m'),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
 
   /** Nhiều origin thì phân tách bằng dấu phẩy. Không nhận '*' vì có cookie. */

@@ -5,7 +5,32 @@ export interface DefaultCategory {
   type: TxType;
   /** Tên icon trong lucide-react. */
   icon: string;
-  /** #RRGGBB — đi thẳng vào màu series của chart. */
+  /**
+   * #RRGGBB cho swatch/dot cạnh tên danh mục.
+   *
+   * ─── Màu danh mục là TRANG TRÍ, không phải kênh identity ───
+   *
+   * Người dùng tạo được danh mục không giới hạn, nên không bảng màu cố định nào
+   * phủ hết được — và ngay ở 11 danh mục thì đã không thể có 11 màu phân biệt
+   * được: kiểm bằng validator cho thấy với đủ 28 cặp thì không thứ tự màu nào
+   * đạt ngưỡng, kể cả với người thị lực bình thường.
+   *
+   * Nên identity của danh mục luôn do **tên + icon** mang, ở mọi chỗ nó xuất hiện.
+   * Màu chỉ là dấu hiệu phụ. Và chart KHÔNG BAO GIỜ mã hoá theo màu danh mục:
+   * bar breakdown dùng một hue duy nhất, tên danh mục nằm trên trục.
+   *
+   * Các giá trị dưới đây lấy từ bảng màu đã qua validator (không tự chọn theo
+   * cảm quan): mỗi màu đạt lightness band và chroma floor nên swatch nào cũng
+   * nhìn thấy được. Bộ màu cũ tôi tự chọn có `#3b82f6`↔`#a855f7` cách nhau CVD
+   * ΔE 0.9 — người mù màu deutan không phân biệt nổi — và ba màu xám cách nhau
+   * ΔE 5.2 nên người thị lực bình thường cũng không phân biệt được.
+   *
+   * `#898781` (Khác / Thu khác) cố tình là xám trung tính: nó có nghĩa "không
+   * thuộc nhóm nào", nên việc nó không có sắc thái riêng là đúng ý.
+   *
+   * Màu trùng nhau giữa nhóm thu và nhóm chi là chấp nhận được: hai nhóm không
+   * bao giờ hiển thị cạnh nhau như hai nghĩa khác nhau, và `type` luôn hiện.
+   */
   color: string;
   sortOrder: number;
   /** Keyword sinh CategoryRule để auto-categorize ngay từ lần import đầu. */
@@ -29,7 +54,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Ăn uống',
     type: 'expense',
     icon: 'UtensilsCrossed',
-    color: '#f97316',
+    color: '#eb6834',
     sortOrder: 10,
     keywords: [
       'HIGHLANDS',
@@ -53,7 +78,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Đi chợ / Siêu thị',
     type: 'expense',
     icon: 'ShoppingCart',
-    color: '#84cc16',
+    color: '#008300',
     sortOrder: 20,
     keywords: [
       'WINMART',
@@ -72,7 +97,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Di chuyển',
     type: 'expense',
     icon: 'Car',
-    color: '#06b6d4',
+    color: '#2a78d6',
     sortOrder: 30,
     keywords: [
       'GRAB',
@@ -96,7 +121,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Mua sắm',
     type: 'expense',
     icon: 'ShoppingBag',
-    color: '#ec4899',
+    color: '#e87ba4',
     sortOrder: 40,
     keywords: [
       'SHOPEE',
@@ -116,7 +141,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Hoá đơn & Tiện ích',
     type: 'expense',
     icon: 'Receipt',
-    color: '#eab308',
+    color: '#eda100',
     sortOrder: 50,
     keywords: [
       'EVN',
@@ -138,7 +163,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Sức khoẻ',
     type: 'expense',
     icon: 'HeartPulse',
-    color: '#ef4444',
+    color: '#e34948',
     sortOrder: 60,
     keywords: ['BENH VIEN', 'PHONG KHAM', 'NHA THUOC', 'LONG CHAU', 'PHARMACITY', 'AN KHANG', 'VINMEC'],
   },
@@ -146,7 +171,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Giải trí',
     type: 'expense',
     icon: 'Clapperboard',
-    color: '#a855f7',
+    color: '#4a3aa7',
     sortOrder: 70,
     keywords: ['CGV', 'LOTTE CINEMA', 'GALAXY CINE', 'BHD STAR', 'NETFLIX', 'SPOTIFY', 'YOUTUBE', 'STEAM'],
   },
@@ -154,7 +179,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Giáo dục',
     type: 'expense',
     icon: 'GraduationCap',
-    color: '#3b82f6',
+    color: '#1baf7a',
     sortOrder: 80,
     keywords: ['HOC PHI', 'TRUONG', 'UDEMY', 'COURSERA', 'IELTS', 'TRUNG TAM'],
   },
@@ -162,7 +187,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Chuyển tiền',
     type: 'expense',
     icon: 'ArrowLeftRight',
-    color: '#64748b',
+    color: '#0d9488',
     sortOrder: 90,
     keywords: ['CHUYEN TIEN', 'CK DEN', 'MOMO', 'ZALOPAY', 'VNPAY', 'RUT TIEN', 'ATM'],
   },
@@ -170,7 +195,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Phí & Lãi',
     type: 'expense',
     icon: 'Landmark',
-    color: '#78716c',
+    color: '#b45309',
     sortOrder: 100,
     keywords: ['PHI DICH VU', 'PHI SMS', 'PHI THUONG NIEN', 'PHI QUAN LY', 'LAI VAY', 'PHI CHUYEN TIEN'],
   },
@@ -178,7 +203,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Khác',
     type: 'expense',
     icon: 'Ellipsis',
-    color: '#94a3b8',
+    color: '#898781',
     sortOrder: 999,
     keywords: [],
   },
@@ -188,7 +213,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Lương',
     type: 'income',
     icon: 'Wallet',
-    color: '#10b981',
+    color: '#008300',
     sortOrder: 10,
     keywords: ['LUONG', 'SALARY', 'THANH TOAN LUONG', 'TRA LUONG'],
   },
@@ -196,7 +221,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Thưởng',
     type: 'income',
     icon: 'Gift',
-    color: '#14b8a6',
+    color: '#1baf7a',
     sortOrder: 20,
     keywords: ['THUONG', 'BONUS', 'KHEN THUONG'],
   },
@@ -204,7 +229,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Lãi tiết kiệm',
     type: 'income',
     icon: 'PiggyBank',
-    color: '#0ea5e9',
+    color: '#2a78d6',
     sortOrder: 30,
     keywords: ['LAI TIEN GUI', 'LAI SUAT', 'TIET KIEM'],
   },
@@ -212,7 +237,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     name: 'Thu khác',
     type: 'income',
     icon: 'Plus',
-    color: '#22c55e',
+    color: '#898781',
     sortOrder: 999,
     keywords: [],
   },

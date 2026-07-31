@@ -95,15 +95,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
   } {
     switch (error.code) {
       // Vi phạm unique constraint
-      case 'P2002': {
-        const target = error.meta?.['target'];
-        const fields = Array.isArray(target) ? target.join(', ') : String(target ?? '');
-        // Trường hợp hay gặp nhất và đáng nói rõ: dedupe hash trùng khi import
-        const message = fields.includes('dedupeHash')
-          ? 'Giao dịch này đã tồn tại'
-          : `Dữ liệu đã tồn tại${fields ? ` (${fields})` : ''}`;
-        return { status: HttpStatus.CONFLICT, body: { statusCode: 409, message } };
-      }
+      case 'P2002':
+        return {
+          status: HttpStatus.CONFLICT,
+          body: { statusCode: 409, message: conflictMessage(error.meta?.['target']) },
+        };
       // Vi phạm foreign key — thường là categoryId trỏ vào danh mục không tồn tại
       case 'P2003':
         return {
@@ -127,4 +123,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
         };
     }
   }
+}
+
+/**
+ * Dịch unique constraint bị vi phạm thành câu người dùng hiểu được.
+ *
+ * Không trả thẳng tên field của Prisma ra ngoài: "Dữ liệu đã tồn tại (userId,
+ * keyword)" vừa lộ cấu trúc nội bộ vừa không nói cho người dùng biết phải sửa gì.
+ */
+function conflictMessage(target: unknown): string {
+  const fields = Array.isArray(target) ? target.map(String) : [String(target ?? '')];
+  const has = (field: string): boolean => fields.some((f) => f.includes(field));
+
+  if (has('dedupeHash')) return 'Giao dịch này đã tồn tại';
+  if (has('keyword')) return 'Đã có rule cho keyword này — hãy sửa rule sẵn có thay vì tạo mới';
+  if (has('email')) return 'Email này đã được đăng ký';
+  if (has('name')) return 'Đã có danh mục cùng tên và cùng loại thu/chi';
+  if (has('month')) return 'Đã có ngân sách cho danh mục này trong kỳ đó';
+  return 'Dữ liệu đã tồn tại';
 }

@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
+import { CategoriesModule } from './categories/categories.module';
 import { HealthController } from './health/health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 
@@ -10,6 +11,7 @@ import { PrismaModule } from './prisma/prisma.module';
   imports: [
     PrismaModule,
     AuthModule,
+    CategoriesModule,
     // Rate limit mặc định cho toàn API. Route auth siết chặt hơn bằng @Throttle
     // riêng, vì đó là chỗ bị brute-force.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),

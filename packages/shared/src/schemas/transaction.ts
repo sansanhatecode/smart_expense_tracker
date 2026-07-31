@@ -1,0 +1,75 @@
+import { z } from 'zod';
+import {
+  dateOnlySchema,
+  txTypeSchema,
+  vndAmountSchema,
+  vndBalanceSchema,
+  type TxType,
+} from '../common';
+import type { CategoryDto } from './category';
+
+export const createTransactionSchema = z.object({
+  amount: vndAmountSchema,
+  type: txTypeSchema,
+  date: dateOnlySchema,
+  description: z.string().trim().min(1, 'Vui lòng nhập mô tả').max(500),
+  categoryId: z.string().min(1).nullable().default(null),
+  balance: vndBalanceSchema.nullable().default(null),
+});
+
+export const updateTransactionSchema = createTransactionSchema.partial();
+
+export type CreateTransactionInput = z.infer<typeof createTransactionSchema>;
+export type UpdateTransactionInput = z.infer<typeof updateTransactionSchema>;
+
+export const transactionSortSchema = z
+  .enum(['date_desc', 'date_asc', 'amount_desc', 'amount_asc'])
+  .default('date_desc');
+
+export type TransactionSort = z.infer<typeof transactionSortSchema>;
+
+/**
+ * Query của danh sách giao dịch. Mọi field đều optional để URL sạch khi không
+ * filter gì — và vì FE đồng bộ state filter vào query string.
+ */
+export const transactionQuerySchema = z
+  .object({
+    from: dateOnlySchema.optional(),
+    to: dateOnlySchema.optional(),
+    categoryId: z.string().min(1).optional(),
+    /** 'none' = lọc riêng các giao dịch chưa gán danh mục. */
+    uncategorized: z.stringbool().optional(),
+    type: txTypeSchema.optional(),
+    q: z.string().trim().min(1).max(200).optional(),
+    importBatchId: z.string().min(1).optional(),
+    sort: transactionSortSchema,
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+  })
+  .refine((v) => !v.from || !v.to || v.from <= v.to, {
+    message: 'Ngày bắt đầu phải trước ngày kết thúc',
+    path: ['from'],
+  });
+
+export type TransactionQuery = z.infer<typeof transactionQuerySchema>;
+
+export interface TransactionDto {
+  id: string;
+  /** Số nguyên VND, luôn dương. Chiều nằm ở `type`. */
+  amount: number;
+  type: TxType;
+  /** 'YYYY-MM-DD' */
+  date: string;
+  description: string;
+  balance: number | null;
+  category: Pick<CategoryDto, 'id' | 'name' | 'type' | 'icon' | 'color'> | null;
+  importBatchId: string | null;
+  createdAt: string;
+}
+
+export const bulkCategorizeSchema = z.object({
+  transactionIds: z.array(z.string().min(1)).min(1).max(500),
+  categoryId: z.string().min(1).nullable(),
+});
+
+export type BulkCategorizeInput = z.infer<typeof bulkCategorizeSchema>;

@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { Providers } from '@/lib/providers';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -7,7 +8,6 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  // Khai báo cả hai để browser chọn đúng bộ token: xem globals.css
   themeColor: [
     { media: '(prefers-color-scheme: light)', color: '#f9f9f7' },
     { media: '(prefers-color-scheme: dark)', color: '#0d0d0d' },
@@ -17,7 +17,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="vi" suppressHydrationWarning>
-      <body className="min-h-dvh">{children}</body>
+      <body className="min-h-dvh">
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

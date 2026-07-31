@@ -12,7 +12,7 @@ build/
 next-env.d.ts
 
 # Prisma 7 sinh client ra đây (không commit)
-apps/api/generated/
+apps/api/src/generated/
 
 # testing
 coverage/

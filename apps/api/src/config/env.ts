@@ -1,0 +1,58 @@
+import { config as loadEnv } from 'dotenv';
+import { z } from 'zod';
+
+loadEnv({ quiet: true });
+
+/**
+ * Env được validate ngay lúc boot, không phải lúc dùng.
+ *
+ * Lý do: thiếu JWT_ACCESS_SECRET mà chỉ phát hiện khi có người bấm login là
+ * kiểu lỗi tệ nhất — nó qua được deploy, qua được health check, rồi mới nổ vào
+ * mặt người dùng. Ở đây process chết ngay với thông báo nói rõ thiếu biến nào.
+ */
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL không được rỗng'),
+
+  JWT_ACCESS_SECRET: z
+    .string()
+    .min(32, 'JWT_ACCESS_SECRET cần ít nhất 32 ký tự (dùng: openssl rand -base64 48)'),
+  /** Định dạng của jsonwebtoken: '15m', '1h', '7d'. */
+  ACCESS_TOKEN_TTL: z.string().min(2).default('15m'),
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+
+  /** Nhiều origin thì phân tách bằng dấu phẩy. Không nhận '*' vì có cookie. */
+  WEB_ORIGIN: z.string().min(1).default('http://localhost:3000'),
+
+  MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(4 * 1024 * 1024),
+  MAX_IMPORT_ROWS: z.coerce.number().int().positive().default(10_000),
+});
+
+function parseEnv() {
+  const result = envSchema.safeParse(process.env);
+
+  if (!result.success) {
+    const lines = result.error.issues.map(
+      (issue) => `  - ${issue.path.join('.') || '(root)'}: ${issue.message}`,
+    );
+    throw new Error(
+      `Cấu hình môi trường không hợp lệ:\n${lines.join('\n')}\n\n` +
+        `Xem apps/api/.env.example để biết cần những biến nào.`,
+    );
+  }
+
+  return result.data;
+}
+
+export const env = parseEnv();
+
+export type Env = typeof env;
+
+export const isProduction = env.NODE_ENV === 'production';
+
+/** Danh sách origin được phép gọi API kèm cookie. */
+export const allowedOrigins: string[] = env.WEB_ORIGIN.split(',')
+  .map((origin) => origin.trim())
+  .filter((origin) => origin.length > 0);

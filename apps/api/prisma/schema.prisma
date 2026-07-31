@@ -1,9 +1,11 @@
 // Prisma 7: generator `prisma-client`, `output` bắt buộc, url nằm ở prisma.config.ts.
 // moduleFormat = "cjs" vì NestJS build ra CommonJS.
 
+// output nằm TRONG src/ là có chủ ý: nếu để ngoài, tsc tính rootDir là apps/api
+// và sinh ra dist/src/main.js, làm `node dist/main.js` hỏng.
 generator client {
   provider     = "prisma-client"
-  output       = "../generated/prisma"
+  output       = "../src/generated/prisma"
   moduleFormat = "cjs"
 }
 

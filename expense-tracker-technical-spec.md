@@ -43,7 +43,7 @@ packages/shared   Zod + types            → cả hai đầu import
 | Charts | Recharts | nhẹ, đủ dùng |
 | ORM / DB | Prisma 7 + PostgreSQL (**Neon**) | type-safe; Neon scale-to-zero rồi **tự wake < 1s** |
 | Auth | JWT access (memory) + refresh token (httpOnly cookie), argon2id | Tách origin → JWT là lựa chọn đúng. Xem ADR 9.7 |
-| File parse | papaparse (CSV), .xlsx (xem §9.2), pdfjs-dist (mở rộng) | `xlsx` trên npm đã bỏ rơi + có CVE |
+| File parse | papaparse (CSV), **read-excel-file** (.xlsx), pdfjs-dist (mở rộng) | `xlsx` trên npm đã bỏ rơi + có CVE; `exceljs` kéo 76 dep và mang theo vuln — xem §9.2 |
 | Money | `BigInt` (số nguyên VND) | VND không có đơn vị nhỏ hơn đồng — xem §9.3 |
 | Test | **Vitest** | ESM native, ít config với TS |
 | Deploy | **Vercel (web) + Render (api) + Neon (DB)** | 0đ. Đánh đổi: Render free sleep — xem ADR 9.9 |
@@ -350,11 +350,20 @@ PDF parser cho sao kê PDF · LLM insight ("tháng này tiêu cà phê nhiều h
 
 Bản `xlsx` trên npm registry dừng ở 0.18.5 và có CVE severity cao (ReDoS, prototype pollution) **không có fix trên npm** — SheetJS chuyển sang phát hành qua CDN riêng. Đây là app parse file do người dùng upload, tức đúng đường tấn công.
 
-Nói cho chính xác: **`exceljs` cũng không sạch.** `npm audit` báo `exceljs → archiver → glob/minimatch` và `uuid`, và không có bản fix tiến lên (npm gợi ý downgrade về exceljs@3.4.0). Khác biệt vẫn có ý nghĩa — CVE của `xlsx` nằm trong chính parser, trên đúng code path đọc file untrusted; còn của `exceljs` nằm ở nhánh archiver dùng khi *ghi* file. Nhưng nó không phải lý do để tự nhận là an toàn.
+`exceljs` là lựa chọn hiển nhiên tiếp theo, nhưng **cũng không sạch**. Đã đo, không phỏng đoán:
 
-Điều dẫn tới lựa chọn cuối: ta chỉ cần **đọc** .xlsx, mà `exceljs` là thư viện đọc-ghi-styling đầy đủ — thừa, và cái thừa đó chính là chỗ phát sinh cây phụ thuộc có vấn đề. Nên ưu tiên một thư viện read-only (`read-excel-file`) với cây phụ thuộc nhỏ hơn; quyết định chốt khi implement XlsxParser, dựa trên việc API của nó có đủ cho BankProfile hay không.
+| | transitive deps | vuln do nó kéo vào |
+| :--- | ---: | :--- |
+| `exceljs` 4.4.0 | **76** | archiver, archiver-utils, glob, minimatch, readdir-glob, rimraf, zip-stream, uuid — **không có fix tiến lên** (npm gợi ý downgrade về 3.4.0) |
+| `read-excel-file` 9.3.5 | **6** | không có |
 
-Nguyên tắc chung rút ra: chọn thư viện theo **quyền hạn tối thiểu cần dùng**, không theo độ phổ biến.
+Bỏ `exceljs` làm tổng vuln của repo giảm **22 → 14**, và 14 cái còn lại đều là dev/build-time (eslint, `@nestjs/cli`, `next → postcss/sharp`). Nghĩa là đường runtime chạm file do người dùng upload không còn lỗ hổng nào được biết.
+
+Lý do gốc của khoảng cách 76 vs 6: ta chỉ cần **đọc** .xlsx, còn `exceljs` là thư viện đọc-ghi-styling đầy đủ. Phần "ghi" là chỗ kéo `archiver`, và `archiver` là chỗ phát sinh gần hết số vuln — tức ta đang trả giá bảo mật cho tính năng không dùng.
+
+**Chọn: `read-excel-file`** (`XlsxParser` dùng entry `read-excel-file/node`). Có test chạy trên một file .xlsx thật trong `__fixtures__`.
+
+Nguyên tắc rút ra: chọn thư viện theo **quyền hạn tối thiểu cần dùng**, không theo độ phổ biến. Bề mặt tấn công của một dependency tỉ lệ với những gì nó *có thể* làm, không phải những gì ta gọi.
 
 ### 9.3. `BigInt` thay `Decimal(14,2)`
 

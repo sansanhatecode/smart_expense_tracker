@@ -99,5 +99,6 @@ export interface UploadedFile {
 export interface StatementParser {
   readonly source: ImportSource;
   supports(file: UploadedFile): boolean;
-  parse(file: UploadedFile, profile: BankProfile): ParseResult;
+  /** Async vì thư viện đọc .xlsx là async; CsvParser chỉ trả promise đã resolve. */
+  parse(file: UploadedFile, profile: BankProfile): Promise<ParseResult>;
 }

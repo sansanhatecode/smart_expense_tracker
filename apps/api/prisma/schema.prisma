@@ -1,0 +1,251 @@
+// Prisma 7: generator `prisma-client`, `output` bắt buộc, url nằm ở prisma.config.ts.
+// moduleFormat = "cjs" vì NestJS build ra CommonJS.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  categories    Category[]
+  categoryRules CategoryRule[]
+  transactions  Transaction[]
+  budgets       Budget[]
+  importBatches ImportBatch[]
+  refreshTokens RefreshToken[]
+}
+
+/// Refresh token rotation có reuse detection.
+///
+/// Mỗi lần login mở một "family". Refresh thành công thì token cũ bị revoke và
+/// trỏ `replacedById` sang token mới. Nếu một token ĐÃ revoke được dùng lại →
+/// coi như token bị đánh cắp → revoke toàn bộ family, buộc login lại.
+///
+/// Chỉ lưu sha256 của token, không bao giờ lưu token gốc.
+model RefreshToken {
+  id           String    @id @default(cuid())
+  userId       String
+  tokenHash    String    @unique
+  familyId     String
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?   @unique
+  userAgent    String?
+  ip           String?
+  createdAt    DateTime  @default(now())
+
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replacedBy RefreshToken? @relation("TokenRotation", fields: [replacedById], references: [id], onDelete: SetNull)
+  replaces   RefreshToken? @relation("TokenRotation")
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Danh mục
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Category {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  type      TxType
+  icon      String   @default("Tag")
+  /// #RRGGBB — dùng trực tiếp làm màu series trong chart
+  color     String   @default("#64748b")
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions       Transaction[]
+  stagedTransactions StagedTransaction[]
+  budgets            Budget[]
+  rules              CategoryRule[]
+
+  @@unique([userId, name, type])
+  @@index([userId])
+}
+
+/// Rule auto-categorize theo keyword. `priority` cao hơn thắng khi nhiều rule khớp.
+model CategoryRule {
+  id         String   @id @default(cuid())
+  userId     String
+  /// Keyword đã uppercase, so khớp bằng "contains" trên description đã normalize
+  keyword    String
+  categoryId String
+  priority   Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, keyword])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Giao dịch
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Transaction {
+  id String @id @default(cuid())
+
+  userId     String
+  categoryId String?
+
+  /// Số nguyên VND, LUÔN > 0 (CHECK constraint trong migration).
+  /// Chiều thu/chi nằm ở `type`, không nằm ở dấu. Xem ADR 9.4.
+  amount BigInt
+  type   TxType
+
+  /// Ngày lịch, KHÔNG phải instant — nên không có bug timezone. Xem ADR 9.5.
+  date        DateTime @db.Date
+  description String
+
+  /// Số dư sau giao dịch, nếu sao kê có cột này. Là discriminator tốt nhất cho dedupe.
+  balance BigInt?
+
+  /// sha256(userId|date|amount|type|normalizedDesc|balance ?? seq). Xem ADR 9.8.
+  dedupeHash    String
+  importBatchId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  importBatch ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, dedupeHash])
+  @@index([userId, date])
+  @@index([userId, categoryId])
+  @@index([userId, type, date])
+  @@index([importBatchId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Import
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ImportBatch {
+  id          String       @id @default(cuid())
+  userId      String
+  source      ImportSource
+  fileName    String
+  bankProfile String?
+  /// Số dòng parse được từ file
+  rowCount    Int
+  status      ImportStatus @default(pending)
+  createdAt   DateTime     @default(now())
+  confirmedAt DateTime?
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  staged       StagedTransaction[]
+  transactions Transaction[]
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+}
+
+/// Hàng chờ confirm.
+///
+/// Tồn tại vì `POST /imports` và `POST /imports/:id/confirm` là hai request khác
+/// nhau, không chia sẻ bộ nhớ. Nhờ bảng này mà `Transaction` KHÔNG BAO GIỜ chứa
+/// dòng chưa confirm — nên không query thống kê nào cần filter theo status.
+/// Xem ADR 9.6.
+model StagedTransaction {
+  id      String @id @default(cuid())
+  batchId String
+
+  /// Thứ tự trong file gốc, để preview hiển thị đúng thứ tự người dùng thấy
+  rowIndex Int
+
+  categoryId String?
+  amount     BigInt
+  type       TxType
+  date       DateTime @db.Date
+  description String
+  balance    BigInt?
+  dedupeHash String
+
+  duplicate DuplicateKind @default(none)
+  /// User có thể bỏ tick dòng không muốn import
+  selected  Boolean       @default(true)
+  /// Dòng gốc từ file, để debug khi parse sai
+  rawLine   String
+
+  batch    ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  category Category?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([batchId, rowIndex])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ngân sách
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Budget {
+  id         String @id @default(cuid())
+  userId     String
+  categoryId String
+  /// Kỳ ngân sách dạng 'YYYY-MM'
+  month      String
+  /// Số nguyên VND, > 0
+  limitAmount BigInt
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, categoryId, month])
+  @@index([userId, month])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum TxType {
+  income
+  expense
+}
+
+enum ImportSource {
+  csv
+  xlsx
+  pdf
+}
+
+enum ImportStatus {
+  pending
+  confirmed
+  rolled_back
+}
+
+/// Vì sao một dòng staged bị coi là trùng: trùng với dòng khác trong cùng file,
+/// hay trùng với giao dịch đã có trong DB.
+enum DuplicateKind {
+  none
+  in_batch
+  in_db
+}

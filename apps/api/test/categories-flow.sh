@@ -3,7 +3,7 @@
 # (IDOR) và các invariant không thể diễn đạt bằng schema.
 set -uo pipefail
 
-API=http://localhost:3001
+API=${API_BASE:-http://localhost:3001}
 PASS="matkhau12345"
 A_EMAIL="cat-a-$RANDOM@example.com"
 B_EMAIL="cat-b-$RANDOM@example.com"

@@ -5,7 +5,7 @@
 #   - sửa giao dịch KHÔNG tính lại dedupeHash
 set -uo pipefail
 
-API=http://localhost:3001
+API=${API_BASE:-http://localhost:3001}
 PASS="matkhau12345"
 A_EMAIL="tx-a-$RANDOM@example.com"
 B_EMAIL="tx-b-$RANDOM@example.com"

@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # Kiểm tra rate limit trên route auth thật sự chặn.
 #
-# Đọc AUTH_THROTTLE_LIMIT từ env để chạy đúng ở cả hai cấu hình: mặc định (10)
-# và cấu hình nâng cao dùng khi chạy cả bộ e2e.
+# Chạy với cấu hình THẬT (mặc định 10/phút), không phải cấu hình nâng cao mà các
+# suite chức năng dùng — nếu không thì phải gửi hàng trăm request, mỗi request một
+# phép argon2 19MiB, và bài test mất vài phút mà chẳng kiểm được gì thêm.
+#
+# run-all.sh khởi động riêng một instance ở port 3002 với giới hạn thật cho suite
+# này. Chạy tay thì trỏ API_BASE vào instance đang dùng cấu hình mặc định.
 set -uo pipefail
 
-API=http://localhost:3001
+API=${API_BASE:-http://localhost:3001}
 LIMIT=${AUTH_THROTTLE_LIMIT:-10}
 PASSED=0; FAILED=0
 
@@ -14,31 +18,36 @@ check() {
   else printf '  ✗ %-58s got=%s want=%s\n' "$1" "$2" "$3"; FAILED=$((FAILED+1)); fi
 }
 
-echo "── Rate limit trên /auth/login (giới hạn hiện tại: $LIMIT/phút) ───────────"
+if [ "$LIMIT" -gt 40 ]; then
+  echo "  ⨯ Bỏ qua: AUTH_THROTTLE_LIMIT=$LIMIT quá cao để kiểm bằng cách gửi vượt."
+  echo "    Suite này cần cấu hình mặc định. run-all.sh lo việc đó tự động."
+  echo
+  echo "══ 0 passed, 0 failed ══"
+  exit 0
+fi
 
-# Gọi vượt giới hạn. Dùng login với mật khẩu sai — đúng hình dạng của brute-force,
-# và không tạo user rác.
-got429=0
-codes=""
-for i in $(seq 1 $((LIMIT + 5))); do
+echo "── Rate limit /auth/login (giới hạn: $LIMIT/phút, API: $API) ──────────────"
+
+# Gửi vượt giới hạn bằng login sai mật khẩu — đúng hình dạng brute-force, và
+# không tạo user rác.
+saw401=0; saw429=0
+for _ in $(seq 1 $((LIMIT + 3))); do
   c=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/auth/login" \
     -H 'Content-Type: application/json' \
     -d '{"email":"khong-ton-tai@example.com","password":"sai-mat-khau"}')
-  codes="$codes $c"
-  [ "$c" = "429" ] && got429=1
+  [ "$c" = "401" ] && saw401=1
+  [ "$c" = "429" ] && saw429=1
 done
 
-check "vượt giới hạn thì bị chặn bằng 429" "$got429" "1"
-check "trước khi bị chặn vẫn trả 401 (không phải 429 ngay từ đầu)" \
-  "$(echo "$codes" | tr ' ' '\n' | grep -c '^401$' | awk '{print ($1>0)?1:0}')" "1"
+check "vài request đầu trả 401 (chưa bị chặn ngay)" "$saw401" "1"
+check "vượt giới hạn thì bị chặn bằng 429" "$saw429" "1"
 
-echo "── /health không bị rate limit chặt như auth ──────────────────────────────"
+echo "── /health không bị siết như route auth ───────────────────────────────────"
 health_ok=1
-for i in $(seq 1 20); do
-  c=$(curl -s -o /dev/null -w '%{http_code}' "$API/health")
-  [ "$c" != "200" ] && health_ok=0
+for _ in $(seq 1 25); do
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$API/health")" != "200" ] && health_ok=0
 done
-check "20 lần gọi /health liên tiếp vẫn 200" "$health_ok" "1"
+check "25 lần gọi /health liên tiếp vẫn 200" "$health_ok" "1"
 
 echo
 echo "══ $PASSED passed, $FAILED failed ══"

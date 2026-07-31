@@ -6,7 +6,7 @@
 #   - rollback trả DB về đúng trạng thái trước đó
 set -uo pipefail
 
-API=http://localhost:3001
+API=${API_BASE:-http://localhost:3001}
 PASS="matkhau12345"
 EMAIL="imp-$RANDOM@example.com"
 OTHER="imp-other-$RANDOM@example.com"

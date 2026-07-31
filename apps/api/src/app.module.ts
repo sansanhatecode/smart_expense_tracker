@@ -3,10 +3,12 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
+import { BudgetsModule } from './budgets/budgets.module';
 import { CategoriesModule } from './categories/categories.module';
 import { HealthController } from './health/health.controller';
 import { ImportsModule } from './imports/imports.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { StatsModule } from './stats/stats.module';
 import { TransactionsModule } from './transactions/transactions.module';
 
 @Module({
@@ -16,6 +18,8 @@ import { TransactionsModule } from './transactions/transactions.module';
     CategoriesModule,
     TransactionsModule,
     ImportsModule,
+    StatsModule,
+    BudgetsModule,
     // Rate limit mặc định cho toàn API. Route auth siết chặt hơn bằng @Throttle
     // riêng, vì đó là chỗ bị brute-force.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),

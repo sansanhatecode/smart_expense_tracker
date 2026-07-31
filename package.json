@@ -21,7 +21,8 @@
     "db:migrate": "npm run db:migrate -w @expense/api",
     "db:seed": "npm run db:seed -w @expense/api",
     "db:studio": "npm run db:studio -w @expense/api",
-    "db:reset": "npm run db:reset -w @expense/api"
+    "db:reset": "npm run db:reset -w @expense/api",
+    "test:e2e": "npm run test:e2e -w @expense/api"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

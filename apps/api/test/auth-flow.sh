@@ -3,7 +3,7 @@
 # CẢ FAMILY, không chỉ token bị dùng lại.
 set -uo pipefail
 
-API=http://localhost:3001
+API=${API_BASE:-http://localhost:3001}
 JAR=$(mktemp -d)
 EMAIL="test-$RANDOM@example.com"
 PASS="matkhau12345"

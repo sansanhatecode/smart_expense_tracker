@@ -140,7 +140,7 @@ ALTER TABLE "Transaction" ADD CONSTRAINT "Transaction_description_not_blank" CHE
 **Quy ước:**
 - `amount` là **`BigInt` số nguyên VND, luôn dương**; chiều thu/chi do `type` quyết định. Không dùng `Float`, không dùng `Decimal`, không cần decimal library. Serialize sang `number` ở API boundary (số tiền VND thực tế < 2^53).
 - `date` là **`DATE`** — sao kê cho ngày lịch. Không lưu timestamptz, nên không có bug lệch tháng ở ranh giới UTC/ICT.
-- `dedupeHash` = `sha256(userId | date | amount | type | normalized_description | balance ?? seq)` → unique constraint chặn import trùng. Chi tiết ở §4.
+- `dedupeHash` = `sha256(userId | date | amount | type | normalized_description | seq)` → unique constraint chặn import trùng. `balance` cố tình KHÔNG tham gia hash — xem ADR 9.8. Chi tiết ở §4.
 - Index `(userId, date)` phục vụ filter theo kỳ và aggregation dashboard.
 
 ---
@@ -229,14 +229,22 @@ interface BankProfile {
 
 Hash **không được** chỉ gồm `(date, amount, description)`: hai ly cà phê 25.000đ cùng ngày cùng mô tả sẽ cho cùng hash → unique constraint chặn cái thứ hai → **mất dữ liệu thật**.
 
-Discriminator, theo thứ tự ưu tiên:
+Discriminator là **`seq`** — thứ tự xuất hiện trong nhóm các dòng giống hệt nhau, nhóm theo `(date, amount, type, normalizedDesc)`:
 
-1. **`balance`** (số dư sau giao dịch) nếu sao kê có — hai giao dịch giống nhau vẫn để lại số dư khác nhau.
-2. **`seq`** nếu không có balance — trong batch vừa parse, nhóm theo `(date, amount, type, normalizedDesc)` rồi gán 0, 1, 2… và đưa vào hash.
+```
+hash = sha256(userId | date | amount | type | normalizedDesc | seq)
+```
 
-Cách 2 vẫn đúng khi import lại file chồng kỳ: cùng dữ liệu → cùng thứ tự → cùng `seq` → cùng hash → dedupe đúng. Hai giao dịch thật khác nhau thì `seq` khác → giữ cả hai.
+- Hai ly cà phê thật → seq 0 và 1 → hai hash khác nhau → **giữ cả hai**.
+- Import lại cùng file → vẫn seq 0 và 1 → cùng hash → **nhận ra trùng**.
 
-`normalizedDesc` = uppercase, gộp khoảng trắng, bỏ dấu câu, cắt các chuỗi biến động (mã GD, timestamp) — chuẩn hoá ở một chỗ duy nhất trong `dedupe.ts`.
+**`seq` của dòng import phải tính TRONG BATCH**, không cộng thêm số dòng đã có trong DB. Cộng vào thì import lại cùng file sẽ ra seq 2,3 thay vì 0,1, hash khác đi và dedupe mất tác dụng hoàn toàn.
+
+**Giao dịch nhập tay** cũng đi qua đúng công thức này, với `seq` = số giao dịch đã có cùng khoá. Nhờ đó nhập tay 1 ly cà phê (seq 0) rồi import file có 2 ly thì dòng đầu bị nhận là trùng, dòng thứ hai được thêm.
+
+`normalizedDesc`: bỏ dấu tiếng Việt (cùng giao dịch có thể export có dấu hoặc không), uppercase, gộp khoảng trắng, bỏ dấu câu — nhưng **giữ chữ số**. Bỏ chữ số đi thì hai giao dịch khác nhau có thể trùng khoá, mà mất dữ liệu tệ hơn sinh trùng. Ngân hàng phát ra mã tham chiếu biến động giữa các lần export thì xử lý bằng `stripPattern` trong BankProfile, không làm yếu hàm chuẩn hoá cho mọi ngân hàng.
+
+Toàn bộ nằm ở `apps/api/src/imports/dedupe.ts`, là pure function nên test được không cần DB.
 
 ---
 
@@ -281,7 +289,7 @@ Vì API là Node long-running (Render) chứ không phải serverless, route imp
 
 **Timezone.** Không có vấn đề timezone: `date` là `DATE`, so sánh và group theo ngày lịch trực tiếp.
 
-**Dedupe.** Unique `(userId, dedupeHash)` + discriminator balance/seq → import lại file chồng lấn kỳ vẫn an toàn **mà không xoá mất giao dịch trùng lặp hợp lệ**.
+**Dedupe.** Unique `(userId, dedupeHash)` + discriminator `seq` → import lại file chồng lấn kỳ vẫn an toàn **mà không xoá mất giao dịch trùng lặp hợp lệ**. Giao dịch nhập tay dùng cùng công thức nên dedupe xuyên được giữa nhập tay và import.
 
 **Auto-categorize.** Rule keyword ("GRAB"→Di chuyển, "HIGHLANDS"→Ăn uống) chạy trước; giao dịch không khớp để `categoryId = null` cho user tự gán ở bước preview.
 
@@ -376,9 +384,19 @@ Nên: JWT access token (memory, 15 phút) + refresh token opaque (httpOnly cooki
 
 Điều **không** thay đổi là lo ngại ban đầu: tự viết refresh rotation là bề mặt lỗi bảo mật lớn. Nên nó được implement đầy đủ chứ không làm nửa vời — token family, rotation, reuse detection, revocation, và chỉ lưu hash. Một refresh flow chỉ có "cấp token mới khi token cũ còn hạn" thì tệ hơn không có refresh token, vì nó tạo cảm giác an toàn mà không có cơ chế thu hồi.
 
-### 9.8. `seq`/`balance` trong dedupe hash
+### 9.8. `seq` trong dedupe hash, và vì sao KHÔNG dùng `balance`
 
-Xem §4. Hash `(date, amount, description)` đơn thuần biến hai giao dịch hợp lệ giống nhau thành "trùng" và xoá âm thầm một cái. Đây là tình huống chắc chắn xảy ra với chi tiêu thật (hai lần cà phê cùng ngày), không phải edge case.
+Hash `(date, amount, description)` đơn thuần biến hai giao dịch hợp lệ giống nhau thành "trùng" và xoá âm thầm một cái. Đây là tình huống chắc chắn xảy ra với chi tiêu thật (hai lần cà phê cùng ngày), không phải edge case. Nên cần thêm discriminator.
+
+Bản đầu của ADR này chọn `balance` (số dư sau giao dịch) làm discriminator ưu tiên, vì nó gần như duy nhất tuyệt đối. **Đã bỏ, và lý do đáng ghi lại.**
+
+`balance` chia không gian hash làm hai phần rời nhau: dòng từ sao kê có balance, giao dịch nhập tay thì không. Hệ quả cụ thể — người dùng nhập tay "cà phê 25k ngày 15/7", sau đó import sao kê chứa đúng giao dịch đó, và nhận về **hai bản**. Đó là loại trùng dễ thấy nhất và khó hiểu nhất đối với người dùng, vì họ biết rõ mình chỉ uống một ly.
+
+Dùng `seq` cho **cả hai** đường thì chúng chung một không gian hash, và dedupe xuyên được giữa nhập tay và import. Chi tiết công thức ở §4; đã có test cho đúng tình huống này.
+
+`balance` vẫn được lưu — chỉ là không tham gia hash. Nó hữu ích để đối chiếu khi nghi parser đọc sai cột.
+
+Nguyên tắc rút ra: discriminator chính xác hơn nhưng **chỉ có ở một nguồn dữ liệu** thì tệ hơn discriminator thô hơn nhưng có ở mọi nguồn.
 
 ### 9.9. Cold start của Render: biết trước, và có đường thoát
 

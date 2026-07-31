@@ -122,10 +122,12 @@ model Transaction {
   date        DateTime @db.Date
   description String
 
-  /// Số dư sau giao dịch, nếu sao kê có cột này. Là discriminator tốt nhất cho dedupe.
+  /// Số dư sau giao dịch, nếu sao kê có cột này. KHÔNG dùng cho dedupe (xem ADR
+  /// 9.8) — chỉ để đối chiếu khi nghi parser đọc sai cột.
   balance BigInt?
 
-  /// sha256(userId|date|amount|type|normalizedDesc|balance ?? seq). Xem ADR 9.8.
+  /// sha256(userId|date|amount|type|normalizedDesc|seq). `balance` cố tình
+  /// không tham gia hash — xem ADR 9.8 và src/imports/dedupe.ts.
   dedupeHash    String
   importBatchId String?
 

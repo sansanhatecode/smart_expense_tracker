@@ -28,7 +28,7 @@ export function detectAccount(profile: BankProfile, rows: RawTransaction[]): Det
   return {
     kind,
     fingerprint: `${profile.bank}:${kind}`,
-    name: defaultName(profile, kind),
+    name: defaultAccountName(profile.bank, kind),
   };
 }
 
@@ -55,10 +55,14 @@ const GENERIC_NAMES: Record<AccountKind, string> = {
   wallet: 'Ví điện tử',
 };
 
-function defaultName(profile: BankProfile, kind: AccountKind): string {
+/**
+ * Tên mặc định của một nguồn tiền. Export để script backfill đặt tên y hệt
+ * đường import — hai chỗ lệch nhau sẽ cho ra hai cái tên cho cùng một cái ví.
+ */
+export function defaultAccountName(bank: string, kind: AccountKind): string {
   // Profile generic không biết mình là ngân hàng nào, và `label` của nó là 'Tự
   // động nhận dạng' — đúng cho dropdown chọn profile, vô nghĩa làm tên nguồn tiền.
-  if (profile.bank === 'generic') return GENERIC_NAMES[kind];
+  if (bank === 'generic') return GENERIC_NAMES[kind];
 
-  return kind === 'credit_card' ? `Thẻ tín dụng ${profile.bank}` : profile.bank;
+  return kind === 'credit_card' ? `Thẻ tín dụng ${bank}` : bank;
 }

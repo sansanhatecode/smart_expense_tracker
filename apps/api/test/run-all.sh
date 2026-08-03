@@ -22,7 +22,7 @@ FUNCTIONAL_API=http://localhost:3001
 THROTTLE_API=http://localhost:3002
 FUNCTIONAL_LIMIT=${AUTH_THROTTLE_LIMIT:-500}
 
-FUNCTIONAL_SUITES=(auth-flow categories-flow transactions-flow imports-flow stats-budgets-flow)
+FUNCTIONAL_SUITES=(auth-flow categories-flow transactions-flow imports-flow accounts-flow stats-budgets-flow)
 
 reset_db() { psql "${DB[@]}" -q -c 'delete from "User";' >/dev/null 2>&1; }
 

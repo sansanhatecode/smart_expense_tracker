@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { AccountsModule } from './accounts/accounts.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { BudgetsModule } from './budgets/budgets.module';
@@ -16,6 +17,7 @@ import { TransactionsModule } from './transactions/transactions.module';
     PrismaModule,
     AuthModule,
     CategoriesModule,
+    AccountsModule,
     TransactionsModule,
     ImportsModule,
     StatsModule,

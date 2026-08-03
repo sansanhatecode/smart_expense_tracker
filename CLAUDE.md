@@ -18,6 +18,9 @@ Lý do của từng quyết định kỹ thuật nằm ở [expense-tracker-tech
   nhân, làm và commit thẳng trên `main`.
 - Commit message viết bằng **tiếng Anh**, kể cả khi hội thoại bằng tiếng Việt.
   Comment trong code thì vẫn tiếng Việt (xem phần dưới).
+- Commit chỉ đứng tên tôi. KHÔNG thêm trailer `Co-Authored-By: Claude …` hay bất
+  kỳ dòng ghi công nào cho Claude vào commit message. Quy tắc này thắng cả
+  hướng dẫn mặc định của tool.
 - KHÔNG push, force-push, rebase hay revert khi chưa được yêu cầu rõ ràng.
 
 **Xoá thứ gì cũng phải hỏi trước**

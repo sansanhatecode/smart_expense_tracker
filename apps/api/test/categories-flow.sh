@@ -36,7 +36,7 @@ A=$(register "$A_EMAIL"); B=$(register "$B_EMAIL")
 echo "── 1. Danh mục mặc định ───────────────────────────────────────────────────"
 R=$(req GET /api/categories "$A")
 check "GET /api/categories → 200" "$(code "$R")" "200"
-check "user mới có 15 danh mục seed" "$(body "$R" | jq_ '.length')" "15"
+check "user mới có 16 danh mục seed" "$(body "$R" | jq_ '.length')" "16"
 check "mỗi danh mục có transactionCount" "$(body "$R" | jq_ '[0].transactionCount')" "0"
 check "cần đăng nhập" "$(code "$(curl -s -w '\n%{http_code}' "$API/api/categories")")" "401"
 
@@ -67,7 +67,7 @@ check "danh mục của A vẫn còn" "$(code "$(req GET /api/categories "$A")")
 
 echo "── 4. Rule auto-categorize ────────────────────────────────────────────────"
 R=$(req GET /api/category-rules "$A")
-check "user mới có 108 rule seed" "$(body "$R" | jq_ '.length')" "108"
+check "user mới có 121 rule seed" "$(body "$R" | jq_ '.length')" "121"
 R=$(req POST /api/category-rules "$A" "{\"keyword\":\"quan oc co ba\",\"categoryId\":\"$CAT\",\"priority\":10}")
 check "tạo rule → 201" "$(code "$R")" "201"
 check "keyword được uppercase" "$(body "$R" | jq_ '.keyword')" "QUAN OC CO BA"

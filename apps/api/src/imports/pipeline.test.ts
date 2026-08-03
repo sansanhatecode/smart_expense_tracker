@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { AUTO_DETECT_CANDIDATES, findProfile, GENERIC_PROFILE } from './bank-profiles';
+import { DEFAULT_CATEGORIES } from '../categories/default-categories';
 import { categorize, categorizeAll, type CategorizerRule } from './categorizer';
+import { normalizeDescription } from './dedupe';
+import { buildMccRules } from './mcc';
 import { normalize } from './normalizer';
 import { CsvParser } from './parsers/csv.parser';
 import type { UploadedFile } from './types';
@@ -355,5 +358,378 @@ describe('categorize', () => {
     const result = categorizeAll(rows, rules);
     expect(result[0]).toMatchObject({ rowIndex: 0, categoryId: 'di-chuyen' });
     expect(result[1]).toMatchObject({ rowIndex: 1, categoryId: null });
+  });
+});
+
+describe('categorize với bộ rule mặc định', () => {
+  // Dựng rule đúng cách auth.service dựng lúc đăng ký, để test nói về thứ người
+  // dùng thật sự nhận được chứ không phải một bộ rule bịa riêng cho test.
+  const defaultRules: CategorizerRule[] = DEFAULT_CATEGORIES.flatMap((category) =>
+    category.keywords.map((keyword) => ({
+      keyword: keyword.toUpperCase(),
+      categoryId: `${category.type}:${category.name}`,
+      categoryType: category.type,
+      priority: 0,
+    })),
+  );
+
+  const LAI = 'income:Lãi tiết kiệm';
+  const HOAN = 'income:Tiền hoàn';
+
+  function categoryOf(description: string, type: 'income' | 'expense'): string | null {
+    return categorize({ normalizedDescription: normalizeDescription(description), type }, defaultRules);
+  }
+
+  it('tiền lời của ví điện tử vào danh mục lãi', () => {
+    expect(categoryOf('Tiền lời Túi Thần Tài ngày 02/08/2026', 'income')).toBe(LAI);
+    expect(categoryOf('Tiền lãi tháng 7', 'income')).toBe(LAI);
+    expect(categoryOf('Lãi suất tiền gửi', 'income')).toBe(LAI);
+  });
+
+  it('tiền hoàn đi vào danh mục riêng, không lẫn vào lãi', () => {
+    expect(categoryOf('Hoàn tiền giao dịch không thành công', 'income')).toBe(HOAN);
+    expect(categoryOf('Nhận tiền hoàn từ Shopee', 'income')).toBe(HOAN);
+    expect(categoryOf('Hoàn trả đơn hàng', 'income')).toBe(HOAN);
+    expect(categoryOf('Refund order #12345', 'income')).toBe(HOAN);
+    expect(categoryOf('Cashback 5% VNPAY', 'income')).toBe(HOAN);
+  });
+
+  it('rút gốc khỏi Túi Thần Tài KHÔNG phải lãi', () => {
+    // Lý do 'TUI THAN TAI' không nằm trong keyword: dòng này cũng là một khoản
+    // thu, và gọi tiền gốc rút ra là "lãi" thì thổi phồng thu nhập.
+    expect(categoryOf('Rút tiền từ Túi Thần Tài', 'income')).toBeNull();
+  });
+
+  it('app giao đồ ăn vào Ăn uống, không vào Mua sắm hay Di chuyển', () => {
+    const AN_UONG = 'expense:Ăn uống';
+
+    expect(categoryOf('Mua Hàng / Foody', 'expense')).toBe(AN_UONG);
+    // Thắng được 'SHOPEE' và 'GRAB' nhờ luật keyword dài hơn thắng
+    expect(categoryOf('Thanh toan ShopeeFood', 'expense')).toBe(AN_UONG);
+    expect(categoryOf('SHOPEE FOOD HCM', 'expense')).toBe(AN_UONG);
+    expect(categoryOf('GrabFood đơn 123', 'expense')).toBe(AN_UONG);
+    expect(categoryOf('GRAB FOOD', 'expense')).toBe(AN_UONG);
+    expect(categoryOf('Baemin', 'expense')).toBe(AN_UONG);
+
+    // Còn đơn Shopee/Grab thường thì vẫn về đúng chỗ cũ
+    expect(categoryOf('Thanh toan Shopee', 'expense')).toBe('expense:Mua sắm');
+    expect(categoryOf('Grab chuyến đi', 'expense')).toBe('expense:Di chuyển');
+  });
+
+  it('không đụng tới chiều chi', () => {
+    // Cùng một chuỗi, chiều chi thì rule thu không được chạm vào
+    expect(categoryOf('Nạp tiền vào Túi Thần Tài', 'expense')).toBeNull();
+    expect(categoryOf('Hoàn trả khoản vay', 'expense')).toBeNull();
+    expect(categoryOf('Hoàn tiền giao dịch không thành công', 'expense')).toBeNull();
+  });
+});
+
+describe('categorize theo MCC — sao kê thẻ tín dụng', () => {
+  // Dựng đúng bộ mà một user thật có sau khi đăng ký: danh mục mặc định + rule
+  // keyword mặc định + bảng MCC nối vào chính các danh mục đó.
+  const categories = DEFAULT_CATEGORIES.map((category) => ({
+    id: `${category.type}:${category.name}`,
+    name: category.name,
+    type: category.type,
+  }));
+
+  const defaultRules: CategorizerRule[] = DEFAULT_CATEGORIES.flatMap((category) =>
+    category.keywords.map((keyword) => ({
+      keyword: keyword.toUpperCase(),
+      categoryId: `${category.type}:${category.name}`,
+      categoryType: category.type,
+      priority: 0,
+    })),
+  );
+
+  const mccRules = buildMccRules(categories);
+
+  const AN_UONG = 'expense:Ăn uống';
+  const DI_CHUYEN = 'expense:Di chuyển';
+  const GIAI_TRI = 'expense:Giải trí';
+  const HOAN = 'income:Tiền hoàn';
+
+  function categoryOf(
+    description: string,
+    type: 'income' | 'expense',
+    mcc: string | null = null,
+  ): string | null {
+    return categorize(
+      { normalizedDescription: normalizeDescription(description), type, mcc },
+      defaultRules,
+      mccRules,
+    );
+  }
+
+  it('phân loại được descriptor mà không keyword nào bắt được', () => {
+    // Đây là lý do tồn tại của cả tính năng: tên trên sao kê thẻ bị cắt cụt, dính
+    // tiền tố cổng thanh toán, hoặc là tên hộ kinh doanh cá thể.
+    expect(categoryOf('MPOS*88213 CH SO 5', 'expense')).toBeNull();
+    expect(categoryOf('MPOS*88213 CH SO 5', 'expense', '5814')).toBe(AN_UONG);
+
+    expect(categoryOf('PAYOO*CTY TNHH ABC', 'expense', '5411')).toBe('expense:Đi chợ / Siêu thị');
+    expect(categoryOf('NGUYEN VAN A 0908123456', 'expense', '5812')).toBe(AN_UONG);
+    expect(categoryOf('APPLE.COM/BILL', 'expense', '5817')).toBe(GIAI_TRI);
+  });
+
+  it('MCC đè lên rule keyword MẶC ĐỊNH', () => {
+    // 'GRAB' → Di chuyển là phỏng đoán từ chuỗi; MCC 5814 nói điểm bán này là
+    // hàng ăn. Mã do tổ chức thẻ gán thắng phỏng đoán của hệ thống.
+    expect(categoryOf('GRAB* A-12345', 'expense')).toBe(DI_CHUYEN);
+    expect(categoryOf('GRAB* A-12345', 'expense', '5814')).toBe(AN_UONG);
+  });
+
+  it('rule người dùng tự đặt priority thì THẮNG MCC', () => {
+    const withUserRule: CategorizerRule[] = [
+      ...defaultRules,
+      { keyword: 'CANTEEN CTY', categoryId: GIAI_TRI, categoryType: 'expense', priority: 10 },
+    ];
+
+    expect(
+      categorize(
+        { normalizedDescription: 'CANTEEN CTY ABC', type: 'expense', mcc: '5812' },
+        withUserRule,
+        mccRules,
+      ),
+    ).toBe(GIAI_TRI);
+  });
+
+  it('MCC không được kéo dòng HOÀN TIỀN sang danh mục chi', () => {
+    // Hoàn tiền trên thẻ vẫn mang MCC của điểm bán (5812 — nhà hàng) nhưng nó là
+    // một khoản THU. Gán vào "Ăn uống" thì chi tiêu tháng đó bị trừ khống.
+    expect(categoryOf('HOAN TIEN GIAO DICH NHA HANG', 'income', '5812')).toBe(HOAN);
+    // Và không có keyword nào khớp thì để trống, chứ không mượn tạm danh mục chi
+    expect(categoryOf('MPOS*88213 CH SO 5', 'income', '5812')).toBeNull();
+  });
+
+  it('mã chưa ánh xạ hoặc không có MCC thì mọi thứ như cũ', () => {
+    expect(categoryOf('KHACH SAN ABC', 'expense', '7011')).toBeNull();
+    expect(categoryOf('HIGHLANDS COFFEE', 'expense', '7011')).toBe(AN_UONG);
+    expect(categoryOf('HIGHLANDS COFFEE', 'expense')).toBe(AN_UONG);
+  });
+
+  it('danh mục user đã đổi tên thì mã của nó im lặng, không gán bừa', () => {
+    const renamed = buildMccRules(categories.filter((category) => category.name !== 'Ăn uống'));
+
+    expect(
+      categorize(
+        { normalizedDescription: 'MPOS 88213 CH SO 5', type: 'expense', mcc: '5812' },
+        defaultRules,
+        renamed,
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('MCC đi qua cả đường parse → normalize', () => {
+  it('đọc được cột MCC của sao kê thẻ', async () => {
+    const parsed = await parse(
+      [
+        'Ngày giao dịch,Diễn giải,MCC,Số tiền ghi nợ,Số tiền ghi có',
+        '15/07/2026,TCH*THE COFFEE HO,5814,85.000,',
+        '16/07/2026,GRABCAR HCM,4121,120.000,',
+        '17/07/2026,CHUYEN KHOAN NOI BO,,500.000,',
+      ].join('\n'),
+    );
+
+    expect(parsed.skipped).toEqual([]);
+    expect(parsed.rows.map((row) => row.mcc)).toEqual(['5814', '4121', null]);
+
+    const { rows } = normalize(parsed.rows, GENERIC_PROFILE);
+    expect(rows.map((row) => row.mcc)).toEqual(['5814', '4121', null]);
+  });
+
+  it('rút MCC từ mô tả khi sao kê không tách thành cột', async () => {
+    const parsed = await parse(
+      ['Ngày,Nội dung,Số tiền', '15/07/2026,POS 998877 MCC 5812 QUAN AN NGON,-250.000'].join('\n'),
+    );
+
+    // Parser chỉ lo cột; mô tả là việc của normalizer, nơi đã có bản chuẩn hoá.
+    expect(parsed.rows[0]?.mcc).toBeNull();
+
+    const { rows } = normalize(parsed.rows, GENERIC_PROFILE);
+    expect(rows[0]?.mcc).toBe('5812');
+  });
+
+  it('cột MCC thắng chuỗi nằm trong mô tả', async () => {
+    const parsed = await parse(
+      ['Ngày,Nội dung,MCC,Số tiền', '15/07/2026,MUA HANG MCC 9999,5411,-250.000'].join('\n'),
+    );
+
+    const { rows } = normalize(parsed.rows, GENERIC_PROFILE);
+    expect(rows[0]?.mcc).toBe('5411');
+  });
+
+  it('sao kê không có cột MCC vẫn nhận bảng bình thường', async () => {
+    const parsed = await parse(
+      ['Ngày,Nội dung,Số tiền', '15/07/2026,HIGHLANDS,-50.000'].join('\n'),
+    );
+
+    expect(parsed.skipped).toEqual([]);
+    expect(parsed.rows[0]?.mcc).toBeNull();
+  });
+});
+
+/**
+ * Dựng theo một sao kê Mastercard THẬT, giữ nguyên bốn đặc điểm của nó:
+ *
+ *   1. Header song ngữ, hai dòng trong cùng một ô — cột MCC thành 'mccmcc'
+ *   2. Ô MCC ghép cả tên ngành: '5812-Eating Places'
+ *   3. Dòng phân cách "Số thẻ / Card number" xen giữa các giao dịch
+ *   4. Cột "Ghi có" mang số ÂM cho hoàn tiền và thanh toán sao kê
+ *
+ * Cả bốn đều là thứ chỉ lộ ra khi có file thật; không cái nào đoán được từ spec.
+ */
+describe('sao kê thẻ tín dụng Mastercard — file thật', () => {
+  const HEADER = [
+    '"Ngày giao dịch\nTransaction date"',
+    '"Ngày hạch toán\nPost date"',
+    '"Diễn giải\nDetails"',
+    '"MCC\nMCC"',
+    '"Ghi nợ/Debit\n(VND)"',
+    '"Ghi có/Credit\n(VND)"',
+  ].join(';');
+
+  const STATEMENT = [
+    'Phát sinh có trong kỳ (VND) (Total Credit Transaction);2.795.479,00',
+    'Dư nợ cuối kỳ (VND) (End Balance);4.151.211,00',
+    'Thanh toán tối thiểu (VND) (Minimum Payment Due);207.561,00',
+    HEADER,
+    '"Số thẻ/ Số tài khoản\nCard number / Account number";;513892******4705;;;',
+    '13/04/2026;15/04/2026;Mua Hàng / 7ELEVEN_3002;5499-Food Stores;48.000,00;0,00',
+    '13/04/2026;15/04/2026;Mua Hàng / FPT*TIKTOKSHOP;5722-Household Stores;76.999,00;0,00',
+    '13/04/2026;16/04/2026;Mua Hàng / WCM_WINMART 6101 LE DU;5411-Grocery Stores;184.983,00;0,00',
+    '14/04/2026;16/04/2026;Mua Hàng / Shopee;5411-Grocery Stores;165.600,00;0,00',
+    '15/04/2026;17/04/2026;Mua Hàng / TLJ Duy Tan;5814-Fast Food;204.000,00;0,00',
+    '19/04/2026;21/04/2026;Mua Hàng / PAYOO*KOI HNC;5814-Fast Food;138.000,00;0,00',
+    '06/05/2026;08/05/2026;Mua Hàng / Shopee;5262-Marketplaces;450.200,00;0,00',
+    '"Số thẻ/ Số tài khoản\nCard number / Account number";;700006792802;;;',
+    '11/04/2026;11/04/2026;[700006792802] - Hoan tien giao dich Card on File ky thang 04/2026;;0,00;-100.000,00',
+    '29/04/2026;29/04/2026;513892xxxxxx4705-700006792802 - Thanh toan sao ke the Master Card 04/2026;6012-Member Financial;0,00;-2.695.479,00',
+    'Phát sinh nợ trong kỳ (VND) (Total Debit Transaction);;;;;4.151.211,00',
+  ].join('\n');
+
+  const categories = DEFAULT_CATEGORIES.map((category) => ({
+    id: `${category.type}:${category.name}`,
+    name: category.name,
+    type: category.type,
+  }));
+
+  const defaultRules: CategorizerRule[] = DEFAULT_CATEGORIES.flatMap((category) =>
+    category.keywords.map((keyword) => ({
+      keyword: keyword.toUpperCase(),
+      categoryId: `${category.type}:${category.name}`,
+      categoryType: category.type,
+      priority: 0,
+    })),
+  );
+
+  const mccRules = buildMccRules(categories);
+
+  async function run() {
+    const parsed = await parse(STATEMENT);
+    const { rows } = normalize(parsed.rows, GENERIC_PROFILE);
+    return {
+      parsed,
+      rows: rows.map((row) => ({ ...row, categoryId: categorize(row, defaultRules, mccRules) })),
+    };
+  }
+
+  it('nhận đúng cột dù header song ngữ hai dòng', async () => {
+    const { parsed } = await run();
+
+    // 8 giao dịch: 7 dòng mua hàng + 1 dòng hoàn tiền. Dòng "Số thẻ", dòng tổng
+    // cộng và dòng thanh toán sao kê đều bị bỏ.
+    expect(parsed.rows).toHaveLength(8);
+    // Ngày lấy ở cột GIAO DỊCH, không phải cột hạch toán
+    expect(parsed.rows[0]?.date).toBe('2026-04-13');
+  });
+
+  it('đọc được ô MCC ghép cả tên ngành tiếng Anh', async () => {
+    const { parsed } = await run();
+
+    expect(parsed.rows.map((row) => row.mcc)).toEqual([
+      '5499',
+      '5722',
+      '5411',
+      '5411',
+      '5814',
+      '5814',
+      '5262',
+      null, // dòng hoàn tiền không có MCC
+    ]);
+  });
+
+  it('dòng phân cách "Số thẻ" và dòng tổng cộng bị bỏ kèm lý do', async () => {
+    const { parsed } = await run();
+
+    const byDate = parsed.skipped.filter((skipped) => /ngày/i.test(skipped.reason));
+    expect(byDate).toHaveLength(3);
+  });
+
+  it('ghi nợ thành chi, ghi có ÂM thành thu', async () => {
+    const { rows } = await run();
+
+    expect(rows[0]).toMatchObject({ type: 'expense', amount: 48_000n });
+    // Sao kê ghi -100.000 ở cột Ghi có: tiền trả lại, làm giảm dư nợ
+    expect(rows[7]).toMatchObject({ type: 'income', amount: 100_000n });
+  });
+
+  it('phân loại được cả những dòng keyword bó tay', async () => {
+    const { rows } = await run();
+    const category = (index: number) => rows[index]?.categoryId;
+
+    // '7ELEVEN_3002' và 'TLJ Duy Tan' không có trong bộ keyword nào
+    expect(category(0)).toBe('expense:Đi chợ / Siêu thị');
+    expect(category(4)).toBe('expense:Ăn uống');
+    // 'FPT*TIKTOKSHOP' — keyword 'TIKTOK SHOP' có khoảng trắng nên trượt
+    expect(category(1)).toBe('expense:Mua sắm');
+    // 'PAYOO*KOI HNC' — tên cổng thanh toán che mất tên quán
+    expect(category(5)).toBe('expense:Ăn uống');
+    // WINMART: MCC và keyword nói cùng một điều
+    expect(category(2)).toBe('expense:Đi chợ / Siêu thị');
+  });
+
+  it('cùng là Shopee nhưng MCC khác nhau thì vào danh mục khác nhau', async () => {
+    const { rows } = await run();
+
+    // Đây là hệ quả trực tiếp của việc MCC đè lên keyword mặc định, và nó CÓ THẬT
+    // trên sao kê: Shopee đăng ký nhiều điểm bán với ngành nghề khác nhau.
+    expect(rows[3]?.categoryId).toBe('expense:Đi chợ / Siêu thị'); // 5411
+    expect(rows[6]?.categoryId).toBe('expense:Mua sắm'); // 5262 — sàn TMĐT
+  });
+
+  it('hoàn tiền vào "Tiền hoàn", không bị MCC kéo sang danh mục chi', async () => {
+    const { rows } = await run();
+
+    expect(rows[7]).toMatchObject({ type: 'income', categoryId: 'income:Tiền hoàn' });
+  });
+
+  it('THANH TOÁN SAO KÊ bị bỏ hẳn, không vào tổng thu', async () => {
+    const { parsed, rows } = await run();
+
+    // 2,7 triệu trả nợ thẻ là tiền đổi chỗ giữa hai túi của cùng một người. Giữ
+    // lại thì tổng thu của tháng phồng lên đúng bằng số tiền đó.
+    expect(rows.some((row) => row.amount === 2_695_479n)).toBe(false);
+    expect(rows.filter((row) => row.type === 'income')).toHaveLength(1); // chỉ còn dòng hoàn tiền
+
+    // Bỏ chứ không giấu: nó hiện ở preview kèm lý do
+    const skipped = parsed.skipped.find((row) => /thanh toán sao kê/i.test(row.reason));
+    expect(skipped?.raw).toContain('Thanh toan sao ke the Master Card');
+  });
+
+  it('cùng nội dung đó ở chiều CHI thì phải giữ — sao kê tài khoản thanh toán', async () => {
+    // Mặt kia của đúng giao dịch trên. Nếu người dùng chỉ import sao kê ngân hàng
+    // thì đây là dấu vết duy nhất của số tiền đã tiêu bằng thẻ; bỏ nó đi là làm
+    // chi tiêu của họ bốc hơi.
+    const parsed = await parse(
+      [
+        'Ngày,Nội dung,Số tiền',
+        '29/04/2026,Thanh toan sao ke the tin dung thang 04,-2.695.479',
+      ].join('\n'),
+    );
+
+    expect(parsed.skipped).toEqual([]);
+    expect(parsed.rows[0]?.amount).toBe(-2_695_479n);
   });
 });

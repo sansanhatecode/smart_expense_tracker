@@ -268,12 +268,14 @@ function PreviewPanel({ batchId, onClose }: { batchId: string; onClose: () => vo
         </dl>
       </Card>
 
-      {/* ─── Dòng không đọc được: nói lý do thay vì im lặng bỏ ─── */}
+      {/* ─── Dòng bị bỏ: nói lý do thay vì im lặng bỏ ─── */}
       {skippedRows.length > 0 && (
         <Card className="p-5">
+          {/* Không gọi là "không đọc được": có dòng bị bỏ vì đọc ĐƯỢC và hiểu rõ
+              là không nên thêm — thanh toán sao kê thẻ, giao dịch thất bại. */}
           <CardHeader
-            title={`${skippedRows.length} dòng không đọc được`}
-            subtitle="Thường là dòng tổng cộng hoặc ghi chú ở cuối file"
+            title={`${skippedRows.length} dòng không được thêm`}
+            subtitle="Dòng tổng cộng, ghi chú cuối file, hoặc khoản không phải giao dịch"
           />
           <ul className="mt-3 space-y-2">
             {skippedRows.map((row) => (

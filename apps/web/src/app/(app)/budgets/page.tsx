@@ -7,7 +7,7 @@ import { Trash2, Wallet } from 'lucide-react';
 import { useState } from 'react';
 import { ApiError, api } from '@/lib/api';
 import { useCategories } from '@/lib/queries';
-import { currentMonthKey, formatMonth } from '@/lib/utils';
+import { currentMonthKey, formatMonth, monthKeyOptions } from '@/lib/utils';
 import { BudgetMeter } from '@/components/charts';
 import {
   Button,
@@ -21,16 +21,8 @@ import {
   Skeleton,
 } from '@/components/ui';
 
-/** 12 tháng gần nhất để chọn kỳ — quá khứ để xem lại, tháng sau để đặt trước. */
-function monthOptions(): string[] {
-  const nowIct = new Date(Date.now() + 7 * 60 * 60 * 1000);
-  const months: string[] = [];
-  for (let offset = 1; offset >= -10; offset -= 1) {
-    const cursor = new Date(Date.UTC(nowIct.getUTCFullYear(), nowIct.getUTCMonth() + offset, 1));
-    months.push(cursor.toISOString().slice(0, 7));
-  }
-  return months;
-}
+/** 12 tháng để chọn kỳ — quá khứ để xem lại, tháng sau để đặt ngân sách trước. */
+const MONTH_OPTIONS = { count: 12, ahead: 1 };
 
 export default function BudgetsPage() {
   const [month, setMonth] = useState(currentMonthKey());
@@ -69,7 +61,7 @@ export default function BudgetsPage() {
           onChange={(e) => setMonth(e.target.value)}
           className="w-44"
         >
-          {monthOptions().map((option) => (
+          {monthKeyOptions(MONTH_OPTIONS.count, MONTH_OPTIONS.ahead).map((option) => (
             <option key={option} value={option}>
               {formatMonth(option)}
             </option>

@@ -1,4 +1,5 @@
 import type { TxType } from '../generated/prisma/enums';
+import type { MccRule } from './mcc';
 
 export interface CategorizerRule {
   /** Đã uppercase. */
@@ -13,12 +14,30 @@ export interface CategorizableRow {
   /** Mô tả đã qua normalizeDescription. */
   normalizedDescription: string;
   type: TxType;
+  /** Mã MCC 4 chữ số, chỉ có ở giao dịch thẻ. Xem ./mcc.ts. */
+  mcc?: string | null;
 }
 
+/** Bảng tra MCC → danh mục của user, khoá là mã 4 chữ số. Xem `buildMccRules`. */
+export type MccRuleMap = ReadonlyMap<string, MccRule>;
+
+const NO_MCC_RULES: MccRuleMap = new Map();
+
 /**
- * Auto-categorize bằng keyword.
+ * Mốc priority mà một rule keyword phải VƯỢT QUA mới thắng được MCC.
  *
- * Thứ tự thắng khi nhiều rule cùng khớp:
+ * Rule mặc định sinh lúc đăng ký có priority 0, rule người dùng tự tạo thì họ tự
+ * đặt (mặc định của API cũng là 0, nhưng ai muốn đè thì đặt cao hơn). Nên con số
+ * 0 ở đây có nghĩa: "MCC thắng phỏng đoán mặc định của hệ thống, nhưng thua ý
+ * muốn được nói rõ của người dùng".
+ */
+const MCC_PRIORITY = 0;
+
+/**
+ * Auto-categorize bằng keyword, có MCC hỗ trợ cho giao dịch thẻ.
+ *
+ * ─── Thứ tự thắng giữa các rule keyword ───
+ *
  *   1. `priority` cao hơn — người dùng đặt được rule đè lên rule mặc định
  *   2. keyword DÀI hơn — cụ thể hơn thì thắng
  *
@@ -31,10 +50,31 @@ export interface CategorizableRow {
  * "LUONG" (danh mục thu) sẽ gán cho một khoản chi có chữ "LUONG" trong mô tả, và
  * transactions.service sẽ từ chối vì lệch chiều — tức người dùng nhận lỗi ở chỗ
  * họ không hiểu được.
+ *
+ * ─── Thứ tự thắng giữa MCC và keyword ───
+ *
+ *     rule người dùng (priority > 0)  >  MCC  >  rule mặc định (priority 0)
+ *
+ * MCC ĐÈ LÊN rule mặc định, và đó là phần dễ gây ngạc nhiên nhất ở đây nên xin
+ * nói rõ lý do: trên sao kê thẻ, thứ mà keyword đem đi so khớp là descriptor —
+ * chuỗi bị cắt cụt và dính tiền tố cổng thanh toán ('TCH*THE COFFEE HO',
+ * 'PAYOO*CTY TNHH ABC'). So khớp "contains" trên một chuỗi như thế vừa hay hụt
+ * vừa hay trúng nhầm. MCC thì do tổ chức thẻ gán cho chính điểm bán đó. Giữa một
+ * suy đoán từ chuỗi bị băm và một mã ngành nghề có thật, mã có thật đáng tin hơn.
+ *
+ * Nhưng MCC KHÔNG đè lên rule người dùng tự đặt priority: khi người ta đã bỏ
+ * công nói "cứ thấy chuỗi này thì xếp vào đây", hệ thống không có tư cách cãi.
+ *
+ * MCC cũng phải cùng chiều thu/chi. Điều này quan trọng với giao dịch HOÀN TIỀN
+ * trên thẻ: dòng hoàn tiền vẫn mang MCC của điểm bán (ví dụ 5812 — nhà hàng)
+ * nhưng nó là một khoản THU. Thiếu kiểm tra chiều thì nó bị xếp vào "Ăn uống",
+ * một danh mục chi, và chi tiêu tháng đó bị trừ khống. Có kiểm tra thì MCC im
+ * lặng, keyword 'HOAN TIEN' làm việc của nó và dòng đó vào "Tiền hoàn".
  */
 export function categorize(
   row: CategorizableRow,
   rules: CategorizerRule[],
+  mccRules: MccRuleMap = NO_MCC_RULES,
 ): string | null {
   let best: CategorizerRule | null = null;
 
@@ -47,7 +87,17 @@ export function categorize(
     }
   }
 
-  return best?.categoryId ?? null;
+  const byMcc = row.mcc ? mccRules.get(row.mcc) : undefined;
+
+  if (!byMcc || byMcc.categoryType !== row.type) {
+    return best?.categoryId ?? null;
+  }
+
+  if (best && best.priority > MCC_PRIORITY) {
+    return best.categoryId;
+  }
+
+  return byMcc.categoryId;
 }
 
 function isBetter(candidate: CategorizerRule, current: CategorizerRule): boolean {
@@ -61,6 +111,7 @@ function isBetter(candidate: CategorizerRule, current: CategorizerRule): boolean
 export function categorizeAll<T extends CategorizableRow>(
   rows: T[],
   rules: CategorizerRule[],
+  mccRules: MccRuleMap = NO_MCC_RULES,
 ): Array<T & { categoryId: string | null }> {
-  return rows.map((row) => ({ ...row, categoryId: categorize(row, rules) }));
+  return rows.map((row) => ({ ...row, categoryId: categorize(row, rules, mccRules) }));
 }

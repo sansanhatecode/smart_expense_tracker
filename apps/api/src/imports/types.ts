@@ -12,6 +12,11 @@ export interface RawTransaction {
   amount: bigint;
   description: string;
   balance: bigint | null;
+  /**
+   * Mã ngành nghề điểm bán, 4 chữ số, CHỈ có ở sao kê thẻ có cột MCC. Sao kê
+   * ghi MCC trong phần mô tả được xử lý ở Normalizer, không phải ở đây.
+   */
+  mcc: string | null;
   /** Dòng gốc, giữ để đối chiếu khi parse sai. */
   raw: string;
   /** Thứ tự trong file, để preview hiện đúng thứ tự người dùng thấy. */
@@ -27,6 +32,8 @@ export interface NormalizedTransaction {
   /** Mô tả đã qua normalizeDescription, dùng cho dedupe và categorize. */
   normalizedDescription: string;
   balance: bigint | null;
+  /** MCC lấy từ cột riêng, hoặc rút từ mô tả nếu sao kê nhúng nó vào đó. */
+  mcc: string | null;
   raw: string;
   rowIndex: number;
 }
@@ -74,6 +81,12 @@ export interface BankProfile {
   creditColumn?: string[];
 
   balanceColumn?: string[];
+
+  /**
+   * Cột MCC của sao kê thẻ tín dụng, nếu file có. Thiếu nó không ảnh hưởng gì
+   * tới việc nhận bảng — sao kê tài khoản thanh toán vốn không có cột này.
+   */
+  mccColumn?: string[];
 
   /**
    * Cột trạng thái giao dịch, nếu file có. Dòng nào trạng thái nói rõ là thất

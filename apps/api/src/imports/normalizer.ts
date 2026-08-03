@@ -1,5 +1,6 @@
 import { MAX_TRANSACTION_VND } from '@expense/shared';
 import { normalizeDescription } from './dedupe';
+import { extractMcc } from './mcc';
 import type { BankProfile, NormalizedTransaction, RawTransaction, SkippedRow } from './types';
 
 export interface NormalizeResult {
@@ -39,13 +40,20 @@ export function normalize(rows: RawTransaction[], profile: BankProfile): Normali
       continue;
     }
 
+    const normalizedDescription = normalizeDescription(row.description, profile.stripPattern);
+
     normalized.push({
       date: row.date,
       amount,
       type: row.amount < 0n ? 'expense' : 'income',
       description: row.description,
-      normalizedDescription: normalizeDescription(row.description, profile.stripPattern),
+      normalizedDescription,
       balance: row.balance,
+      // Cột MCC riêng thắng: nó là dữ liệu có cấu trúc, còn chuỗi trong mô tả thì
+      // chỉ là văn bản. Chỉ khi file không có cột đó mới đi rút từ mô tả — và
+      // rút ở ĐÂY chứ không ở parser vì tới bước này mô tả đã được chuẩn hoá,
+      // nên 'MCC: 5812' và '(mcc-5812)' về cùng một dạng để một regex lo hết.
+      mcc: row.mcc ?? extractMcc(normalizedDescription),
       raw: row.raw,
       rowIndex: row.rowIndex,
     });

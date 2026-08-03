@@ -122,6 +122,39 @@ const BALANCE_ALIASES = [
   'availablebalance',
 ];
 
+/**
+ * Cột MCC của sao kê thẻ tín dụng.
+ *
+ * 'mcc' đứng đầu và chỉ khớp CHÍNH XÁC — indexOfAlias bỏ qua alias ngắn hơn 5
+ * ký tự ở vòng khớp một phần, nên nó không thể vô tình trúng một header khác có
+ * chứa ba chữ cái này.
+ *
+ * KHÔNG thêm 'manganh': nó khớp một phần với 'manganhang' ("Mã ngân hàng"), một
+ * cột hoàn toàn khác mà nhiều sao kê có. Alias cho cột MCC phải đủ dài để không
+ * đụng vào nó.
+ *
+ * 'mccmcc' không phải lỗi gõ. Sao kê thẻ hay in header song ngữ trên hai dòng
+ * trong CÙNG một ô ('Ngày giao dịch' / 'Transaction date'), và với cột MCC thì
+ * cả hai dòng đều là "MCC" — normalizeHeader bỏ xuống dòng nên ô đó thành
+ * 'mccmcc'. Không có alias này thì cột MCC của một sao kê Mastercard thật không
+ * được nhận ra, mà lại không có lỗi nào báo: file vẫn import trọn vẹn, chỉ là
+ * không dòng nào được phân loại theo MCC.
+ */
+const MCC_ALIASES = [
+  'mcc',
+  'mccmcc',
+  'mamcc',
+  'mcccode',
+  'manganhhang',
+  'nganhhang',
+  'nhomnganh',
+  'nhomnganhhang',
+  'loaihinhkinhdoanh',
+  'merchantcategorycode',
+  'merchantcategory',
+  'categorycode',
+];
+
 /** Cột trạng thái. Chỉ dùng để BỎ dòng thất bại, không ảnh hưởng nhận cột khác. */
 const STATUS_ALIASES = [
   'trangthai',
@@ -151,6 +184,7 @@ export const GENERIC_PROFILE: BankProfile = {
   debitColumn: DEBIT_ALIASES,
   creditColumn: CREDIT_ALIASES,
   balanceColumn: BALANCE_ALIASES,
+  mccColumn: MCC_ALIASES,
   statusColumn: STATUS_ALIASES,
   dateFormat: 'DD/MM/YYYY',
   skipRows: 0,

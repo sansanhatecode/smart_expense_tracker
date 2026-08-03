@@ -50,6 +50,15 @@ export interface DefaultCategory {
  */
 export const DEFAULT_CATEGORIES: DefaultCategory[] = [
   // ─── Chi ───────────────────────────────────────────────────────────────────
+  /**
+   * Nhóm giao đồ ăn ('SHOPEEFOOD', 'GRABFOOD') thắng được 'SHOPEE' → Mua sắm và
+   * 'GRAB' → Di chuyển CHỈ NHỜ luật keyword dài hơn thắng trong categorizer. Đổi
+   * luật đó thì mọi đơn đồ ăn qua Shopee/Grab lặng lẽ nhảy sang danh mục khác.
+   *
+   * Mỗi tên có hai biến thể liền và rời ('SHOPEEFOOD' / 'SHOPEE FOOD'):
+   * normalizeDescription chỉ gộp ký tự lạ thành khoảng trắng chứ không tách chữ
+   * dính, nên 'SHOPEE FOOD' không khớp được chuỗi 'SHOPEEFOOD'.
+   */
   {
     name: 'Ăn uống',
     type: 'expense',
@@ -72,6 +81,12 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
       'QUAN AN',
       'COFFEE',
       'CAFE',
+      'FOODY',
+      'SHOPEEFOOD',
+      'SHOPEE FOOD',
+      'GRABFOOD',
+      'GRAB FOOD',
+      'BAEMIN',
     ],
   },
   {
@@ -91,6 +106,7 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
       'MEGA MARKET',
       'EMART',
       'SIEU THI',
+      'GO',
     ],
   },
   {
@@ -225,13 +241,41 @@ export const DEFAULT_CATEGORIES: DefaultCategory[] = [
     sortOrder: 20,
     keywords: ['THUONG', 'BONUS', 'KHEN THUONG'],
   },
+  /**
+   * Tiền tự sinh ra từ số dư: lãi gửi ngân hàng và lãi ví.
+   *
+   * Ví điện tử gọi lãi là "tiền lời" ('Tiền lời Túi Thần Tài'), không phải "lãi
+   * suất" — thiếu 'TIEN LOI' thì đúng loại giao dịch sinh ra đều đặn nhất của ví
+   * lại luôn rơi vào "Chưa phân loại".
+   *
+   * KHÔNG lấy 'TUI THAN TAI' làm keyword dù nó nhận thêm được vài dòng: rút gốc
+   * khỏi Túi Thần Tài cũng là một khoản thu khớp chuỗi đó, và gọi tiền gốc rút ra
+   * là "lãi" thì thổi phồng thu nhập. Rule chỉ áp cho giao dịch THU nên các dòng
+   * nạp vào (chi) vốn đã không bị đụng tới.
+   */
   {
     name: 'Lãi tiết kiệm',
     type: 'income',
     icon: 'PiggyBank',
     color: '#2a78d6',
     sortOrder: 30,
-    keywords: ['LAI TIEN GUI', 'LAI SUAT', 'TIET KIEM'],
+    keywords: ['LAI TIEN GUI', 'LAI SUAT', 'TIET KIEM', 'TIEN LAI', 'TIEN LOI'],
+  },
+  /**
+   * Tiền được trả lại: hoàn giao dịch lỗi, hoàn hàng, cashback khuyến mãi.
+   *
+   * Tách khỏi "Lãi tiết kiệm" vì đây không phải tiền sinh ra mà là một khoản chi
+   * được trả ngược. Gộp chung thì "lãi tháng này" đọc ra một con số không có
+   * thật; để riêng thì tổng thu vẫn phồng lên bằng đúng phần đã chi hụt, nhưng ít
+   * ra nhìn breakdown là thấy ngay phần nào là tiền hoàn.
+   */
+  {
+    name: 'Tiền hoàn',
+    type: 'income',
+    icon: 'Undo2',
+    color: '#4a3aa7',
+    sortOrder: 40,
+    keywords: ['TIEN HOAN', 'HOAN TIEN', 'HOAN TRA', 'REFUND', 'CASHBACK'],
   },
   {
     name: 'Thu khác',

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isCardBillPayment,
   isFailedStatus,
   normalizeHeader,
   parseStatementAmount,
@@ -219,5 +220,49 @@ describe('isFailedStatus', () => {
   it('không nhầm vì mảnh chữ ngắn — "huy" nằm trong "chuyen"', () => {
     expect(isFailedStatus('Đã chuyển')).toBe(false);
     expect(isFailedStatus('Chuyển tiền thành công')).toBe(false);
+  });
+});
+
+describe('isCardBillPayment', () => {
+  it('nhận các cách gọi khoản trả nợ thẻ', () => {
+    for (const text of [
+      '513892xxxxxx4705-700006792802 - NGUYEN KIEU LINH - Thanh toan sao ke the Master Card 04/2026',
+      'THANH TOAN SAO KE THE TIN DUNG',
+      'TT sao ke thang 04',
+      'Thanh toán dư nợ thẻ',
+      'CREDIT CARD PAYMENT',
+      'PAYMENT RECEIVED - THANK YOU',
+    ]) {
+      expect(isCardBillPayment(text), text).toBe(true);
+    }
+  });
+
+  it('KHÔNG nhận giao dịch mua hàng bằng thẻ', () => {
+    // Đây là ranh giới quan trọng nhất của hàm: khớp nhầm ở đây làm biến mất một
+    // giao dịch thật khỏi lần import, và người dùng phải tự phát hiện ra là thiếu.
+    for (const text of [
+      'Thanh toan the tai WINMART',
+      'Mua Hàng / Foody',
+      'THANH TOAN QR VNPAY',
+      'Thanh toan hoa don tien dien',
+      'Thanh toan don hang Shopee',
+    ]) {
+      expect(isCardBillPayment(text), text).toBe(false);
+    }
+  });
+
+  it('không nhận nhầm khoản hoàn tiền', () => {
+    // Hoàn tiền cũng là tiền vào trên sao kê thẻ, nhưng nó là tiền thật được trả
+    // lại chứ không phải tiền đổi chỗ — phải giữ.
+    expect(isCardBillPayment('[700006792802] - Hoan tien giao dich Card on File ky thang 04/2026')).toBe(
+      false,
+    );
+  });
+
+  it('ô trống không suy diễn', () => {
+    expect(isCardBillPayment('')).toBe(false);
+    expect(isCardBillPayment('   ')).toBe(false);
+    expect(isCardBillPayment(null)).toBe(false);
+    expect(isCardBillPayment(undefined)).toBe(false);
   });
 });

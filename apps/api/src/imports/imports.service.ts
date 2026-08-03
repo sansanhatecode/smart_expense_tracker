@@ -18,9 +18,10 @@ import type {
   UpdateStagedRowInput,
 } from '@expense/shared';
 import { AUTO_DETECT_CANDIDATES, findProfile } from './bank-profiles';
-import { categorize, type CategorizerRule } from './categorizer';
+import { categorize, type CategorizerRule, type MccRuleMap } from './categorizer';
 import { assignSequences, computeDedupeHash } from './dedupe';
 import { detectFormat, explainUnsupported } from './detect-format';
+import { buildMccRules } from './mcc';
 import { normalize } from './normalizer';
 import { CsvParser } from './parsers/csv.parser';
 import { XlsxParser } from './parsers/xlsx.parser';
@@ -107,12 +108,13 @@ export class ImportsService {
       }),
     }));
 
-    const [existingHashes, rules] = await Promise.all([
+    const [existingHashes, rules, mccRules] = await Promise.all([
       this.findExistingHashes(
         userId,
         hashed.map((row) => row.dedupeHash),
       ),
       this.loadRules(userId),
+      this.loadMccRules(userId),
     ]);
 
     void this.cleanupStalePendingBatches(userId);
@@ -136,7 +138,7 @@ export class ImportsService {
           return {
             batchId: created.id,
             rowIndex: row.rowIndex,
-            categoryId: categorize(row, rules),
+            categoryId: categorize(row, rules, mccRules),
             amount: row.amount,
             type: row.type,
             date: new Date(`${row.date}T00:00:00.000Z`),
@@ -506,6 +508,25 @@ export class ImportsService {
       categoryType: row.category.type,
       priority: row.priority,
     }));
+  }
+
+  /**
+   * Bảng MCC → danh mục cho riêng user này.
+   *
+   * Phải đọc danh mục (không phải rule) vì bảng MCC là hằng số trong code và chỉ
+   * biết TÊN danh mục — id thì mỗi user một khác. Xem chú thích đầu ./mcc.ts.
+   *
+   * Đọc cả danh mục thu lẫn chi dù bảng MCC hiện chỉ có danh mục chi: `categorize`
+   * đối chiếu `categoryType` để chặn dòng hoàn tiền (thu) nhận danh mục chi, và
+   * việc đối chiếu đó chỉ đúng khi dữ liệu vào không bị lọc trước.
+   */
+  private async loadMccRules(userId: string): Promise<MccRuleMap> {
+    const categories = await this.prisma.category.findMany({
+      where: { userId },
+      select: { id: true, name: true, type: true },
+    });
+
+    return buildMccRules(categories);
   }
 
   /**

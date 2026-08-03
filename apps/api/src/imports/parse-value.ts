@@ -243,3 +243,43 @@ export function isFailedStatus(raw: string | null | undefined): boolean {
 
   return FAILED_STATUS_MARKERS.some((marker) => text.includes(marker));
 }
+
+/**
+ * Cách gọi khoản trả nợ thẻ trên sao kê thẻ tín dụng.
+ *
+ * Danh sách này cố tình NGẮN và cụ thể. Khớp nhầm ở đây làm biến mất một giao
+ * dịch thật khỏi lần import, tệ hơn nhiều so với việc bỏ sót một dòng thanh toán
+ * — dòng bỏ sót thì người dùng thấy nó ở preview và bỏ tick được, còn dòng bị
+ * xoá nhầm thì họ phải tự phát hiện ra là thiếu.
+ *
+ * Vì thế KHÔNG có 'thanhtoanthe': "thanh toán thẻ" cũng là cách nói của việc
+ * quẹt thẻ mua hàng, tức đúng những giao dịch phải giữ lại.
+ */
+const CARD_BILL_PAYMENT_MARKERS = [
+  'thanhtoansaoke',
+  'ttsaoke',
+  'thanhtoanduno',
+  'thanhtoanthetindung',
+  'creditcardpayment',
+  'paymentreceived',
+  'paymentthankyou',
+];
+
+/**
+ * Mô tả này có phải là khoản THANH TOÁN SAO KÊ thẻ tín dụng không?
+ *
+ * Đây là tiền từ tài khoản thanh toán chuyển sang trả nợ thẻ — tiền đổi chỗ giữa
+ * hai túi của cùng một người, không phải thu nhập và cũng không phải chi tiêu.
+ * Số tiền thật đã được ghi nhận rồi, ở chính các dòng mua hàng phía trên nó.
+ *
+ * Hàm này CHỈ trả lời về chuỗi mô tả. Việc có bỏ dòng hay không còn phụ thuộc
+ * chiều tiền, và chỗ quyết định là table-parser — xem chú thích ở đó.
+ */
+export function isCardBillPayment(raw: string | null | undefined): boolean {
+  if (raw === null || raw === undefined) return false;
+
+  const text = compact(String(raw));
+  if (text === '') return false;
+
+  return CARD_BILL_PAYMENT_MARKERS.some((marker) => text.includes(marker));
+}

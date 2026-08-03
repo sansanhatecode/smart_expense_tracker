@@ -1,4 +1,6 @@
+import { parseMcc } from './mcc';
 import {
+  isCardBillPayment,
   isFailedStatus,
   normalizeHeader,
   parseStatementAmount,
@@ -27,6 +29,7 @@ interface ResolvedColumns {
   debit: number | null;
   credit: number | null;
   balance: number | null;
+  mcc: number | null;
   status: number | null;
 }
 
@@ -154,14 +157,16 @@ function resolveColumns(headers: string[], profile: BankProfile): ResolvedColumn
   const credit = indexOfAlias(headers, profile.creditColumn);
   const amount = indexOfAlias(headers, profile.amountColumn);
   const balance = indexOfAlias(headers, profile.balanceColumn);
+  const mcc = indexOfAlias(headers, profile.mccColumn);
   const status = indexOfAlias(headers, profile.statusColumn);
 
   if (date === null || desc === null) return null;
   if (debit === null && credit === null && amount === null) return null;
 
-  // `status` không nằm trong điều kiện trên: thiếu nó chỉ nghĩa là file không nói
-  // gì về trạng thái, không phải là không nhận ra được bảng.
-  return { date, desc, amount, debit, credit, balance, status };
+  // `status` và `mcc` không nằm trong điều kiện trên: thiếu chúng chỉ nghĩa là
+  // file không nói gì về trạng thái / ngành nghề điểm bán, không phải là không
+  // nhận ra được bảng. Sao kê tài khoản thanh toán không bao giờ có cột MCC.
+  return { date, desc, amount, debit, credit, balance, mcc, status };
 }
 
 function cellAt(cells: Cell[], index: number | null): Cell {
@@ -206,11 +211,35 @@ function parseRow(
     return { reason: 'Không đọc được số tiền, hoặc số tiền bằng 0' };
   }
 
+  /**
+   * Bỏ khoản trả nợ thẻ tín dụng — nhưng CHỈ khi nó là tiền vào.
+   *
+   * Chiều tiền là thứ phân biệt hai mặt của cùng một giao dịch, và bỏ nhầm mặt
+   * kia sẽ xoá mất tiền thật:
+   *
+   *   Sao kê THẺ — khoản này là tiền VÀO (ghi có, làm giảm dư nợ). Bỏ đi là
+   *   đúng: mọi đồng đã tiêu nằm ở các dòng mua hàng ngay phía trên trong cùng
+   *   file, giữ lại dòng này thì nó thành một khoản thu không có thật.
+   *
+   *   Sao kê TÀI KHOẢN THANH TOÁN — cũng khoản đó nhưng là tiền RA. Phải giữ:
+   *   nếu người dùng chỉ import sao kê ngân hàng mà không import sao kê thẻ thì
+   *   đây là dấu vết DUY NHẤT của số tiền đã tiêu bằng thẻ. Bỏ nó đi là làm chi
+   *   tiêu của họ bốc hơi.
+   */
+  if (amount > 0n && isCardBillPayment(description)) {
+    return {
+      reason:
+        'Thanh toán sao kê thẻ tín dụng — tiền trả nợ thẻ, không phải thu nhập. ' +
+        'Các khoản đã tiêu nằm ở những dòng mua hàng trong cùng sao kê.',
+    };
+  }
+
   return {
     date,
     amount,
     description,
     balance: coerceAmount(cellAt(cells, columns.balance)),
+    mcc: parseMcc(cellAt(cells, columns.mcc)),
     raw: rowToRaw(cells),
     rowIndex,
   };

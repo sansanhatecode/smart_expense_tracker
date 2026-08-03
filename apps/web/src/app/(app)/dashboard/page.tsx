@@ -12,8 +12,16 @@ import { formatVnd } from '@expense/shared';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, Upload, Wallet } from 'lucide-react';
 import Link from 'next/link';
+import { useState } from 'react';
 import { api } from '@/lib/api';
-import { currentMonthKey, currentMonthRange, formatDateShort, formatMonth } from '@/lib/utils';
+import {
+  addMonths,
+  currentMonthKey,
+  formatDateShort,
+  formatMonth,
+  monthKeyOptions,
+  monthRange,
+} from '@/lib/utils';
 import {
   BudgetAlertRow,
   CategoryBars,
@@ -27,20 +35,26 @@ import {
   CategoryIcon,
   EmptyState,
   ErrorState,
+  Select,
   Skeleton,
 } from '@/components/ui';
 
-/** 6 tháng gần nhất, để chart xu hướng có đủ điểm mà nói được gì. */
-function trendRange(): { from: string; to: string } {
-  const { to } = currentMonthRange();
-  const nowIct = new Date(Date.now() + 7 * 60 * 60 * 1000);
-  const from = new Date(Date.UTC(nowIct.getUTCFullYear(), nowIct.getUTCMonth() - 5, 1));
-  return { from: from.toISOString().slice(0, 10), to };
-}
+/** Số tháng chọn được. 12 đủ để so cùng kỳ năm ngoái mà dropdown vẫn đọc được. */
+const MONTH_COUNT = 12;
+
+/** Số điểm của chart xu hướng — đủ để thấy xu hướng, không quá dày để đọc. */
+const TREND_MONTHS = 6;
 
 export default function DashboardPage() {
-  const period = currentMonthRange();
-  const trend = trendRange();
+  // Cả trang xoay quanh một tháng: KPI, danh mục, cảnh báo ngân sách và danh
+  // sách giao dịch đều đọc từ đây, nên không kỳ nào lệch kỳ nào.
+  const [month, setMonth] = useState(currentMonthKey());
+  const period = monthRange(month);
+
+  // Chart kết thúc ở tháng đang xem chứ không phải tháng hiện tại — xem lại
+  // tháng 3 thì phải thấy đường đi dẫn tới tháng 3.
+  const trendFrom = addMonths(month, -(TREND_MONTHS - 1));
+  const trend = { from: monthRange(trendFrom).from, to: period.to };
 
   const summary = useQuery({
     queryKey: ['stats', 'summary', period],
@@ -59,39 +73,62 @@ export default function DashboardPage() {
   });
 
   const alerts = useQuery({
-    queryKey: ['budgets', 'alerts', currentMonthKey()],
-    queryFn: () => api.get<BudgetAlertDto[]>('/api/budgets/alerts', { month: currentMonthKey() }),
+    queryKey: ['budgets', 'alerts', month],
+    queryFn: () => api.get<BudgetAlertDto[]>('/api/budgets/alerts', { month }),
   });
 
   const recent = useQuery({
-    queryKey: ['transactions', 'recent'],
+    queryKey: ['transactions', 'recent', period],
     queryFn: () =>
-      api.get<Paginated<TransactionDto>>('/api/transactions', { limit: 6, sort: 'date_desc' }),
+      api.get<Paginated<TransactionDto>>('/api/transactions', {
+        ...period,
+        limit: 6,
+        sort: 'date_desc',
+      }),
   });
 
-  const noData = summary.data?.transactionCount === 0 && recent.data?.total === 0;
+  const isCurrentMonth = month === currentMonthKey();
+  const noData = summary.data?.transactionCount === 0;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-ink">Tổng quan</h1>
-          <p className="mt-0.5 text-sm text-ink-secondary">
-            {formatMonth(currentMonthKey())}
-          </p>
+          <p className="mt-0.5 text-sm text-ink-secondary">{formatMonth(month)}</p>
         </div>
-        <ButtonLink href="/imports" variant="primary" size="sm">
-          <Upload aria-hidden className="size-4" />
-          Import sao kê
-        </ButtonLink>
+        {/* Ô chọn kỳ nằm NGOÀI nhánh rỗng bên dưới: tháng không có giao dịch vẫn
+            phải đổi được kỳ, nếu không người dùng kẹt ở một tháng trống. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            aria-label="Chọn kỳ"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            className="w-44"
+          >
+            {monthKeyOptions(MONTH_COUNT).map((option) => (
+              <option key={option} value={option}>
+                {formatMonth(option)}
+              </option>
+            ))}
+          </Select>
+          <ButtonLink href="/imports" variant="primary" size="sm">
+            <Upload aria-hidden className="size-4" />
+            Import sao kê
+          </ButtonLink>
+        </div>
       </header>
 
       {noData ? (
         <Card>
           <EmptyState
             icon={Upload}
-            title="Chưa có giao dịch nào"
-            description="Import một file sao kê ngân hàng, hoặc chạy npm run db:seed để xem dashboard với dữ liệu mẫu."
+            title={`Chưa có giao dịch nào trong ${formatMonth(month).toLowerCase()}`}
+            description={
+              isCurrentMonth
+                ? 'Import một file sao kê ngân hàng, hoặc chạy npm run db:seed để xem dashboard với dữ liệu mẫu.'
+                : 'Chọn kỳ khác ở phía trên, hoặc import sao kê của tháng này.'
+            }
             action={
               <ButtonLink href="/imports" variant="primary" size="sm">
                 Import sao kê
@@ -142,7 +179,10 @@ export default function DashboardPage() {
           <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
             {/* ─── Xu hướng 6 tháng ─── */}
             <Card>
-              <CardHeader title="Thu chi 6 tháng" subtitle="Theo tháng" />
+              <CardHeader
+                title={`Thu chi ${TREND_MONTHS} tháng`}
+                subtitle={`${formatMonth(trendFrom)} – ${formatMonth(month)}`}
+              />
               <div className="mt-3">
                 {trendData.isPending ? (
                   <Skeleton className="mx-5 mb-5 h-56" />
@@ -158,7 +198,7 @@ export default function DashboardPage() {
             <Card>
               <CardHeader
                 title="Ngân sách cần chú ý"
-                subtitle={formatMonth(currentMonthKey())}
+                subtitle={formatMonth(month)}
                 action={
                   <Link
                     href="/budgets"
@@ -222,7 +262,7 @@ export default function DashboardPage() {
                 ) : (
                   <CategoryBars
                     items={breakdown.data.expense}
-                    emptyLabel="Chưa có khoản chi nào trong tháng này"
+                    emptyLabel={`Chưa có khoản chi nào trong ${formatMonth(month).toLowerCase()}`}
                   />
                 )}
               </div>
@@ -232,6 +272,7 @@ export default function DashboardPage() {
             <Card>
               <CardHeader
                 title="Giao dịch gần đây"
+                subtitle={formatMonth(month)}
                 action={
                   <Link
                     href="/transactions"

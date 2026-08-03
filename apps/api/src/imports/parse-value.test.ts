@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeHeader, parseStatementAmount, parseStatementDate } from './parse-value';
+import {
+  isFailedStatus,
+  normalizeHeader,
+  parseStatementAmount,
+  parseStatementDate,
+} from './parse-value';
 
 describe('parseStatementAmount', () => {
   it('dấu chấm phân tách nghìn — dạng phổ biến nhất ở VN', () => {
@@ -159,5 +164,60 @@ describe('normalizeHeader', () => {
 
   it('bỏ ký tự BOM và dấu ngoặc kép còn sót từ CSV', () => {
     expect(normalizeHeader('﻿"Số tiền"')).toBe('sotien');
+  });
+});
+
+describe('isFailedStatus', () => {
+  it('nhận ra các trạng thái thất bại của MoMo và ngân hàng', () => {
+    for (const status of [
+      'Thất bại',
+      'THAT BAI',
+      'Không thành công',
+      'Bị từ chối',
+      'Đã hủy',
+      'Đang xử lý',
+      'Chờ xử lý',
+      'Failed',
+      'Rejected',
+      'Cancelled',
+      'Pending',
+    ]) {
+      expect(isFailedStatus(status), status).toBe(true);
+    }
+  });
+
+  it('giữ lại mọi cách viết của trạng thái thành công', () => {
+    for (const status of [
+      'Thành công',
+      'THANH CONG',
+      'Đã thành công',
+      'Giao dịch thành công',
+      'Đã hoàn thành',
+      'Hoàn tất',
+      'Success',
+      'Successful',
+      'Completed',
+    ]) {
+      expect(isFailedStatus(status), status).toBe(false);
+    }
+  });
+
+  it('ô trống không phải là thất bại — file không nói gì thì không suy diễn', () => {
+    expect(isFailedStatus('')).toBe(false);
+    expect(isFailedStatus('   ')).toBe(false);
+    expect(isFailedStatus(null)).toBe(false);
+    expect(isFailedStatus(undefined)).toBe(false);
+  });
+
+  it('trạng thái lạ được GIỮ, không bị bỏ', () => {
+    // Đòi khớp whitelist "thành công" thì một cách viết lạ sẽ bỏ sạch cả file;
+    // giữ lại thì người dùng còn thấy dòng đó ở preview và tự bỏ tick được.
+    expect(isFailedStatus('OK')).toBe(false);
+    expect(isFailedStatus('Đã ghi nhận')).toBe(false);
+  });
+
+  it('không nhầm vì mảnh chữ ngắn — "huy" nằm trong "chuyen"', () => {
+    expect(isFailedStatus('Đã chuyển')).toBe(false);
+    expect(isFailedStatus('Chuyển tiền thành công')).toBe(false);
   });
 });

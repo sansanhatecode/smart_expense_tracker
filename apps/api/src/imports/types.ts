@@ -75,6 +75,13 @@ export interface BankProfile {
 
   balanceColumn?: string[];
 
+  /**
+   * Cột trạng thái giao dịch, nếu file có. Dòng nào trạng thái nói rõ là thất
+   * bại / bị huỷ / đang xử lý thì bị bỏ — ví điện tử (MoMo) xuất cả những dòng
+   * này, và tiền của chúng chưa bao giờ chuyển đi.
+   */
+  statusColumn?: string[];
+
   /** 'DD/MM/YYYY' | 'YYYY-MM-DD' | 'DD-MM-YYYY' | 'MM/DD/YYYY' | 'DD/MM/YY' */
   dateFormat: string;
 

@@ -179,16 +179,67 @@ function buildDateOnly(year: number, month: number, day: number): string | null 
   return `${year}-${mm}-${dd}`;
 }
 
+/** Bỏ dấu, bỏ mọi thứ không phải chữ/số, lowercase. */
+function compact(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/gi, 'd')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
 /**
  * Chuẩn hoá tên cột header để so khớp: bỏ dấu, bỏ khoảng trắng và dấu câu,
  * lowercase. Nhờ đó 'Ngày giao dịch', 'NGAY GIAO DICH', 'Ngay_giao_dich' đều
  * khớp cùng một alias.
  */
 export function normalizeHeader(header: string): string {
-  return header
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/đ/gi, 'd')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
+  return compact(header);
+}
+
+/**
+ * Các trạng thái CHẮC CHẮN là không thành công.
+ *
+ * So khớp trên chuỗi đã compact, nên phải tránh mảnh quá ngắn: 'huy' nằm trong
+ * 'chuyen', nên chỉ nhận 'dahuy' / 'bihuy' / 'huybo'.
+ */
+const FAILED_STATUS_MARKERS = [
+  'thatbai',
+  'khongthanhcong',
+  'tuchoi',
+  'dahuy',
+  'bihuy',
+  'huybo',
+  'dangxuly',
+  'choxuly',
+  'chuaxuly',
+  'fail',
+  'unsuccessful',
+  'reject',
+  'cancel',
+  'pending',
+  'decline',
+  'expire',
+  'reverse',
+  'timeout',
+  'error',
+];
+
+/**
+ * Ô "Trạng thái GD" có nói rằng giao dịch này KHÔNG thành công không?
+ *
+ * Cố tình hỏi ngược lại thay vì "có phải thành công không". Danh sách chữ chỉ
+ * trạng thái thành công là vô hạn ('Thành công', 'Đã hoàn thành', 'Success',
+ * 'Successful', 'Hoàn tất'…), nên đòi phải khớp whitelist thì một cách viết lạ
+ * sẽ làm BỎ SẠCH mọi dòng của file — thiệt hại lớn hơn nhiều so với việc lỡ giữ
+ * lại một dòng thất bại, thứ mà người dùng còn thấy và bỏ tick được ở preview.
+ */
+export function isFailedStatus(raw: string | null | undefined): boolean {
+  if (raw === null || raw === undefined) return false;
+
+  const text = compact(String(raw));
+  if (text === '') return false;
+
+  return FAILED_STATUS_MARKERS.some((marker) => text.includes(marker));
 }

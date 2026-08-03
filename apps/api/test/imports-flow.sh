@@ -226,6 +226,41 @@ else
   echo "  … bỏ qua, không tìm thấy fixture .xlsx"
 fi
 
+echo "── 12. Sao kê MoMo: nội dung ở 'Loại giao dịch', có cột trạng thái ────────"
+# Đúng bộ cột MoMo xuất ra, kèm một dòng THẤT BẠI — tiền của dòng đó chưa bao giờ
+# chuyển đi, nên nó không được vào Transaction và không được tính vào tổng chi.
+cat > "$TMP/momo.csv" <<'CSV'
+STT,Thời gian,Mã giao dịch,Loại giao dịch,Tài khoản chuyển,Tên định danh Tài khoản chuyển,Tài khoản nhận,Tên định danh Tài khoản nhận,Số Tiền,Số Dư Sau giao dịch,Trạng Thái GD
+1,03/08/2026 02:21:01,21671353864,Tiền lời Túi Thần Tài ngày 02/08/2026,momo_interest,,0862727051,02/08/2026,765,11.106.805,Thành công
+2,02/08/2026 21:28:45,140408248267,Nhận từ LUU KHANH LINH,970422_021220033636,LUU KHANH LINH,0862727051,NGUYEN KIEU LINH,3.408.000,11.106.040,Thành công
+3,02/08/2026 12:48:25,140333513902,Chuyển tiền/Thanh toán đến DO THI NHUNG,0862727051,NGUYEN KIEU LINH,w2b_8887809962_970418,DO THI NHUNG,-57.000,7.697.470,Thành công
+4,31/07/2026 23:42:42,140103380338,Nạp tiền điện thoại Viettel,0862727051,NGUYEN KIEU LINH,vttizota_vt.airtime,Viettel,-100.000,7.947.340,Thành công
+5,31/07/2026 15:40:56,140041129377,Nạp tiền vào Túi Thần Tài,0862727051,Ngân hàng liên kết,fifinsight_root6,Túi Thần Tài,-60.000,217,Thất bại
+CSV
+
+# Không truyền bankProfile: người dùng không nên phải biết chọn "MoMo" mới up được.
+R=$(upload "$TOKEN" "$TMP/momo.csv")
+check "upload sao kê MoMo (tự dò) → 201" "$(code "$R")" "201"
+check "parse được 4 dòng thành công" "$(body "$R" | jq_ '.counts.total')" "4"
+check "dòng 'Thất bại' bị bỏ" "$(body "$R" | jq_ '.counts.skipped')" "1"
+check "  lý do nói rõ là giao dịch không thành công" \
+  "$(body "$R" | jq_ '.skippedRows[0].reason' | grep -c 'không thành công')" "1"
+check "số tiền âm → chi, không tính dòng thất bại" "$(body "$R" | jq_ '.counts.expenseTotal')" "157000"
+check "số tiền dương → thu" "$(body "$R" | jq_ '.counts.incomeTotal')" "3408765"
+check "ngày kèm giờ được cắt đúng phần ngày" "$(body "$R" | jq_ '.rows[0].date')" "2026-08-03"
+check "nội dung lấy từ cột 'Loại giao dịch'" \
+  "$(body "$R" | jq_ '.rows[1].description')" "Nhận từ LUU KHANH LINH"
+check "đọc được 'Số Dư Sau giao dịch'" "$(body "$R" | jq_ '.rows[0].balance')" "11106805"
+req DELETE "/api/imports/$(body "$R" | jq_ '.batchId')" "$TOKEN" >/dev/null
+
+# Chọn thẳng "MoMo" ở dropdown cũng phải ra đúng kết quả đó.
+R=$(upload "$TOKEN" "$TMP/momo.csv" momo)
+check "chọn bankProfile=momo → 201" "$(code "$R")" "201"
+check "  vẫn 4 dòng, 1 dòng bị bỏ" \
+  "$(body "$R" | jq_ '.counts.total')/$(body "$R" | jq_ '.counts.skipped')" "4/1"
+check "  batch ghi lại đúng profile đã dùng" "$(body "$R" | jq_ '.bankProfile')" "momo"
+req DELETE "/api/imports/$(body "$R" | jq_ '.batchId')" "$TOKEN" >/dev/null
+
 echo
 echo "══ $PASSED passed, $FAILED failed ══"
 rm -rf "$TMP"

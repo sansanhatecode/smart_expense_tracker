@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GENERIC_PROFILE } from './bank-profiles';
+import { AUTO_DETECT_CANDIDATES, findProfile, GENERIC_PROFILE } from './bank-profiles';
 import { categorize, categorizeAll, type CategorizerRule } from './categorizer';
 import { normalize } from './normalizer';
 import { CsvParser } from './parsers/csv.parser';
@@ -158,6 +158,87 @@ describe('CsvParser — dòng lỗi không được làm hỏng cả lần impor
       ].join('\n'),
     );
     expect(result.rows.map((r) => r.rowIndex)).toEqual([0, 1]);
+  });
+});
+
+describe('MoMo — sao kê ví điện tử', () => {
+  const momoProfile = findProfile('momo');
+
+  // Đúng bộ cột MoMo xuất ra. Trong file thật ô 'Số Dư Sau giao dịch' xuống dòng
+  // giữa tên cột; normalizeHeader bỏ khoảng trắng nên hai cách viết là một.
+  const HEADER =
+    'STT,Thời gian,Mã giao dịch,Loại giao dịch,Tài khoản chuyển,' +
+    'Tên định danh Tài khoản chuyển,Tài khoản nhận,Tên định danh Tài khoản nhận,' +
+    'Số Tiền,Số Dư Sau giao dịch,Trạng Thái GD';
+
+  const ROWS = [
+    '1,03/08/2026 02:21:01,21671353864,Tiền lời Túi Thần Tài ngày 02/08/2026,momo_interest,,0862727051,02/08/2026,765,11.106.805,Thành công',
+    '2,02/08/2026 21:28:45,140408248267,Nhận từ LUU KHANH LINH,970422_021220033636,LUU KHANH LINH,0862727051,NGUYỄN KIỀU LINH,3.408.000,11.106.040,Thành công',
+    '3,02/08/2026 12:48:25,140333513902,Chuyển tiền/Thanh toán đến DO THI NHUNG,0862727051,NGUYỄN KIỀU LINH,w2b_8887809962_970418,DO THI NHUNG,-57.000,7.697.470,Thành công',
+    '4,31/07/2026 23:42:42,140103380338,Nạp tiền điện thoại Viettel,0862727051,NGUYỄN KIỀU LINH,vttizota_vt.airtime,Viettel,-100.000,7.947.340,Thành công',
+  ];
+
+  it('profile "momo" có trong registry và trong danh sách tự dò', () => {
+    expect(momoProfile).not.toBeNull();
+    expect(AUTO_DETECT_CANDIDATES).toContain(momoProfile);
+  });
+
+  it('đọc được file MoMo: nội dung ở "Loại giao dịch", số tiền mang dấu', async () => {
+    const result = await parse([HEADER, ...ROWS].join('\n'), momoProfile ?? GENERIC_PROFILE);
+
+    expect(result.skipped).toEqual([]);
+    expect(result.rows.map((r) => r.amount)).toEqual([765n, 3_408_000n, -57_000n, -100_000n]);
+    expect(result.rows[1]?.description).toBe('Nhận từ LUU KHANH LINH');
+    expect(result.rows[0]?.balance).toBe(11_106_805n);
+  });
+
+  it('cột "Thời gian" có kèm giờ — chỉ lấy phần ngày', async () => {
+    const result = await parse([HEADER, ...ROWS].join('\n'), momoProfile ?? GENERIC_PROFILE);
+
+    expect(result.rows.map((r) => r.date)).toEqual([
+      '2026-08-03',
+      '2026-08-02',
+      '2026-08-02',
+      '2026-07-31',
+    ]);
+  });
+
+  it('giao dịch không thành công bị bỏ, không được tính vào thu/chi', async () => {
+    const failed =
+      '5,31/07/2026 15:40:56,140041129377,Nạp tiền vào Túi Thần Tài,0862727051,' +
+      'Ngân hàng liên kết,fifinsight_root6,Túi Thần Tài,-60.000,217,Thất bại';
+
+    const result = await parse(
+      [HEADER, ...ROWS, failed].join('\n'),
+      momoProfile ?? GENERIC_PROFILE,
+    );
+
+    expect(result.rows).toHaveLength(4);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0]?.reason).toContain('không thành công');
+    // Dòng gốc được giữ để người dùng đối chiếu ở preview
+    expect(result.skipped[0]?.raw).toContain('Nạp tiền vào Túi Thần Tài');
+  });
+
+  it('profile generic cũng đọc được file MoMo — người dùng không cần chọn ví', async () => {
+    // "Loại giao dịch" là alias mô tả xếp cuối của generic, nên nó vẫn được dùng
+    // khi file không có cột nội dung nào khác.
+    const result = await parse([HEADER, ...ROWS].join('\n'));
+    expect(result.rows).toHaveLength(4);
+    expect(result.rows[3]?.description).toBe('Nạp tiền điện thoại Viettel');
+  });
+
+  it('có thêm cột "Ghi chú" để trống thì generic vấp, momo vẫn đọc được', async () => {
+    // Đây là lý do MOMO_PROFILE tồn tại: generic ưu tiên 'ghichu' hơn
+    // 'loaigiaodich', nên nó chọn đúng cột trống rồi bỏ sạch mọi dòng.
+    const header = `${HEADER},Ghi chú`;
+    const rows = ROWS.map((row) => `${row},`);
+
+    const generic = await parse([header, ...rows].join('\n'));
+    expect(generic.rows).toHaveLength(0);
+
+    const momo = await parse([header, ...rows].join('\n'), momoProfile ?? GENERIC_PROFILE);
+    expect(momo.rows).toHaveLength(4);
   });
 });
 

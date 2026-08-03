@@ -1,4 +1,9 @@
-import { normalizeHeader, parseStatementAmount, parseStatementDate } from './parse-value';
+import {
+  isFailedStatus,
+  normalizeHeader,
+  parseStatementAmount,
+  parseStatementDate,
+} from './parse-value';
 import type { BankProfile, ParseResult, RawTransaction, SkippedRow } from './types';
 
 /**
@@ -22,6 +27,7 @@ interface ResolvedColumns {
   debit: number | null;
   credit: number | null;
   balance: number | null;
+  status: number | null;
 }
 
 export function parseTable(
@@ -148,11 +154,14 @@ function resolveColumns(headers: string[], profile: BankProfile): ResolvedColumn
   const credit = indexOfAlias(headers, profile.creditColumn);
   const amount = indexOfAlias(headers, profile.amountColumn);
   const balance = indexOfAlias(headers, profile.balanceColumn);
+  const status = indexOfAlias(headers, profile.statusColumn);
 
   if (date === null || desc === null) return null;
   if (debit === null && credit === null && amount === null) return null;
 
-  return { date, desc, amount, debit, credit, balance };
+  // `status` không nằm trong điều kiện trên: thiếu nó chỉ nghĩa là file không nói
+  // gì về trạng thái, không phải là không nhận ra được bảng.
+  return { date, desc, amount, debit, credit, balance, status };
 }
 
 function cellAt(cells: Cell[], index: number | null): Cell {
@@ -166,6 +175,14 @@ function parseRow(
   profile: BankProfile,
   rowIndex: number,
 ): RawTransaction | { reason: string } {
+  // Kiểm tra trạng thái TRƯỚC ngày và số tiền: một giao dịch thất bại vẫn có đủ
+  // ngày và số tiền hợp lệ, nên nếu để sau thì nó vào thẳng danh sách import.
+  // Ví điện tử (MoMo) xuất cả những dòng này, và tiền của chúng không hề chuyển.
+  const statusCell = cellAt(cells, columns.status);
+  if (statusCell !== null && isFailedStatus(String(statusCell))) {
+    return { reason: `Giao dịch không thành công (trạng thái "${String(statusCell).trim()}")` };
+  }
+
   const dateCell = cellAt(cells, columns.date);
   const date = coerceDate(dateCell, profile.dateFormat);
 
@@ -272,7 +289,10 @@ export function coerceDate(cell: Cell, format: string): string | null {
 
     // Excel serial: 1 ≈ 1900-01-01, 46000 ≈ 2025
     if (cell > 0 && cell < 100_000) {
-      const date = new Date(EXCEL_EPOCH_UTC + Math.round(cell) * 86_400_000);
+      // floor, KHÔNG round: phần thập phân của serial là giờ trong ngày, và ô
+      // "Thời gian" của MoMo có giờ. Làm tròn thì mọi giao dịch sau 12:00 trưa
+      // nhảy sang ngày hôm sau — sai lệch mà không dòng nào bị báo lỗi.
+      const date = new Date(EXCEL_EPOCH_UTC + Math.floor(cell) * 86_400_000);
       return formatUtcDate(date);
     }
 

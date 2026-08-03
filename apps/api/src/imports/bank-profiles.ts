@@ -36,6 +36,15 @@ const DATE_ALIASES = [
   'trandate',
 ];
 
+/**
+ * Thứ tự trong mảng này có ý nghĩa: khớp chính xác được thử theo đúng thứ tự,
+ * nên alias đứng trước thắng khi file có nhiều cột mô tả.
+ *
+ * 'loaigiaodich' xếp CUỐI là có chủ ý. Với sao kê ngân hàng, "Loại giao dịch"
+ * thường chỉ là nhãn kỹ thuật ('Chuyển khoản', 'Thanh toán') còn nội dung thật
+ * nằm ở "Nội dung"/"Diễn giải" — nên nó chỉ được dùng khi không có cột nào tốt
+ * hơn. Với MoMo thì đây lại là cột duy nhất mang nội dung, xem MOMO_PROFILE.
+ */
 const DESC_ALIASES = [
   'noidung',
   'noidunggiaodich',
@@ -52,6 +61,8 @@ const DESC_ALIASES = [
   'narrative',
   'remark',
   'memo',
+  'loaigiaodich',
+  'loaigd',
 ];
 
 /** Cột duy nhất mang dấu +/-. */
@@ -101,12 +112,25 @@ const BALANCE_ALIASES = [
   'sodu',
   'soducuoi',
   'soducuoiky',
+  // 'sodusau' đủ dài để khớp một phần, nên nó bắt luôn 'sodusaugiaodich' của MoMo
+  'sodusau',
   'sodusaugd',
   'soduconlai',
   'balance',
   'runningbalance',
   'closingbalance',
   'availablebalance',
+];
+
+/** Cột trạng thái. Chỉ dùng để BỎ dòng thất bại, không ảnh hưởng nhận cột khác. */
+const STATUS_ALIASES = [
+  'trangthai',
+  'trangthaigd',
+  'trangthaigiaodich',
+  'tinhtrang',
+  'tinhtranggiaodich',
+  'status',
+  'transactionstatus',
 ];
 
 /**
@@ -127,6 +151,7 @@ export const GENERIC_PROFILE: BankProfile = {
   debitColumn: DEBIT_ALIASES,
   creditColumn: CREDIT_ALIASES,
   balanceColumn: BALANCE_ALIASES,
+  statusColumn: STATUS_ALIASES,
   dateFormat: 'DD/MM/YYYY',
   skipRows: 0,
 };
@@ -145,6 +170,36 @@ const US_DATE_PROFILE: BankProfile = {
   id: 'generic-us',
   label: 'Tự động nhận dạng (ngày MM/DD/YYYY)',
   dateFormat: 'MM/DD/YYYY',
+};
+
+/**
+ * MoMo — ví điện tử, không phải ngân hàng, nên file của nó khác thật ở ba điểm:
+ *
+ *   1. Nội dung nằm ở "Loại giao dịch". Ở đây nó là cột duy nhất mang nội dung
+ *      ("Nhận từ LUU KHANH LINH", "Nạp tiền điện thoại Viettel"), nên phải xếp
+ *      ĐẦU danh sách alias. Với profile generic nó xếp cuối, và một file MoMo có
+ *      thêm cột "Ghi chú" để trống sẽ làm generic chọn đúng cột trống đó rồi bỏ
+ *      sạch mọi dòng vì "Thiếu nội dung giao dịch".
+ *   2. Có cột "Trạng Thái GD" và file chứa cả giao dịch KHÔNG thành công.
+ *   3. Cột "Thời gian" là ngày KÈM GIỜ ('03/08/2026 02:21:01').
+ *
+ * Không khai báo debit/credit: MoMo chỉ có một cột "Số Tiền" mang dấu, và bỏ
+ * trống hai field này chặn luôn khả năng một cột khác lỡ khớp alias nợ/có.
+ */
+const MOMO_PROFILE: BankProfile = {
+  ...GENERIC_PROFILE,
+  id: 'momo',
+  bank: 'MoMo',
+  label: 'MoMo (ví điện tử)',
+  source: ['csv', 'xlsx'],
+  descColumn: ['loaigiaodich', 'loaigd', ...DESC_ALIASES],
+  amountColumn: AMOUNT_ALIASES,
+  debitColumn: undefined,
+  creditColumn: undefined,
+  balanceColumn: ['sodusaugiaodich', 'sodusau', ...BALANCE_ALIASES],
+  statusColumn: STATUS_ALIASES,
+  dateFormat: 'DD/MM/YYYY',
+  skipRows: 0,
 };
 
 /**
@@ -192,14 +247,23 @@ export const BANK_PROFILES: BankProfile[] = [
   GENERIC_PROFILE,
   ISO_DATE_PROFILE,
   US_DATE_PROFILE,
+  MOMO_PROFILE,
   ...BANK_PRESETS,
 ];
 
-/** Các profile được thử khi người dùng không chọn ngân hàng. */
+/**
+ * Các profile được thử khi người dùng không chọn ngân hàng.
+ *
+ * MoMo nằm trong danh sách vì file của nó đặt nội dung ở một cột mà generic chỉ
+ * coi là lựa chọn cuối — người dùng không nên phải biết điều đó để up được file.
+ * Nó xếp cuối nên chỉ thắng khi các profile trước đọc được ít dòng hơn, và vòng
+ * lặp đã dừng sớm ở profile đầu tiên đọc trọn file nên chi phí thường là 0.
+ */
 export const AUTO_DETECT_CANDIDATES: BankProfile[] = [
   GENERIC_PROFILE,
   ISO_DATE_PROFILE,
   US_DATE_PROFILE,
+  MOMO_PROFILE,
 ];
 
 export function findProfile(id: string | undefined): BankProfile | null {

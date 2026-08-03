@@ -95,6 +95,17 @@ describe('coerceDate — ba dạng ô ngày mà XLSX có thể cho', () => {
     expect(coerceDate(45_000, 'DD/MM/YYYY')).toBe(expected);
   });
 
+  it('serial có phần giờ giữ nguyên NGÀY, không làm tròn sang hôm sau', () => {
+    // Phần thập phân của serial là giờ trong ngày. Ô "Thời gian" của MoMo có giờ,
+    // và làm tròn thì mọi giao dịch sau 12:00 trưa nhảy sang ngày kế tiếp.
+    const noon = new Date(Date.UTC(1899, 11, 30) + 45_000 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    expect(coerceDate(45_000.01, 'DD/MM/YYYY')).toBe(noon); // 00:14
+    expect(coerceDate(45_000.5, 'DD/MM/YYYY')).toBe(noon); // 12:00
+    expect(coerceDate(45_000.894, 'DD/MM/YYYY')).toBe(noon); // 21:28
+  });
+
   it('số dạng YYYYMMDD', () => {
     expect(coerceDate(20_260_715, 'DD/MM/YYYY')).toBe('2026-07-15');
     expect(coerceDate(20_260_230, 'DD/MM/YYYY')).toBeNull(); // 30/02 không tồn tại

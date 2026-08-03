@@ -130,7 +130,7 @@ function UploadPanel({ onUploaded }: { onUploaded: (batchId: string) => void }) 
 
         <div className="space-y-4">
           <Field
-            label="Ngân hàng"
+            label="Ngân hàng / ví"
             hint="Để tự động nếu không chắc — hệ thống sẽ tự dò định dạng"
           >
             <Select value={profile} onChange={(e) => setProfile(e.target.value)}>

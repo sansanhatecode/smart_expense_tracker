@@ -1,3 +1,4 @@
+import type { LogLevel } from '@nestjs/common';
 import { config as loadEnv } from 'dotenv';
 import { z } from 'zod';
 
@@ -47,6 +48,21 @@ const envSchema = z.object({
    */
   AUTH_THROTTLE_LIMIT: z.coerce.number().int().positive().default(10),
   AUTH_THROTTLE_TTL_MS: z.coerce.number().int().positive().default(60_000),
+
+  /**
+   * Ngưỡng log: bật level này và mọi level nặng hơn.
+   *
+   * Không đặt default ở đây vì mặc định phụ thuộc NODE_ENV (xem `logLevels`):
+   * dev cần `debug`, production thì `debug` chỉ làm phồng chi phí log mà gần như
+   * không ai đọc.
+   */
+  LOG_LEVEL: z.enum(['verbose', 'debug', 'log', 'warn', 'error', 'fatal']).optional(),
+
+  /**
+   * Bật log câu SQL mà Prisma sinh ra. Mặc định tắt vì cực ồn — dùng khi cần
+   * biết một endpoint chậm đang bắn bao nhiêu query (N+1 chẳng hạn).
+   */
+  LOG_SQL: z.stringbool().default(false),
 });
 
 function parseEnv() {
@@ -70,6 +86,18 @@ export const env = parseEnv();
 export type Env = typeof env;
 
 export const isProduction = env.NODE_ENV === 'production';
+
+/**
+ * Các level được bật, theo đúng thứ tự Nest quy định (nhẹ → nặng).
+ *
+ * Nest nhận vào danh sách level bật chứ không nhận một ngưỡng, nên phải tự cắt:
+ * chọn `warn` nghĩa là bật warn, error, fatal.
+ */
+const LEVELS = ['verbose', 'debug', 'log', 'warn', 'error', 'fatal'] as const;
+
+export const logLevels: LogLevel[] = LEVELS.slice(
+  LEVELS.indexOf(env.LOG_LEVEL ?? (isProduction ? 'log' : 'debug')),
+);
 
 /** Danh sách origin được phép gọi API kèm cookie. */
 export const allowedOrigins: string[] = env.WEB_ORIGIN.split(',')

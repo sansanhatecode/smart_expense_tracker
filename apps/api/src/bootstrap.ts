@@ -1,6 +1,7 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
+import { httpLogger } from './common/http-logger.middleware';
 import { allowedOrigins } from './config/env';
 
 /**
@@ -12,6 +13,12 @@ import { allowedOrigins } from './config/env';
  * nữa". Domain layer thì không biết mình đang chạy ở đâu.
  */
 export function configureApp(app: NestExpressApplication): NestExpressApplication {
+  // Đứng đầu chuỗi middleware một cách có chủ ý: mọi thứ chạy sau nó đều nằm
+  // trong request context, nên log ở bất cứ đâu cũng gắn được request id. Đặt
+  // sau cookieParser thì thời gian đo được sẽ thiếu, và lỗi phát sinh trong
+  // cookieParser sẽ không có id.
+  app.use(httpLogger);
+
   app.use(cookieParser());
 
   // CORS phải liệt kê origin cụ thể, không dùng '*': có credentials nên browser

@@ -10,6 +10,7 @@ import type { ApiErrorBody } from '@expense/shared';
 import type { Request, Response } from 'express';
 import { Prisma } from '../generated/prisma/client';
 import { isProduction } from '../config/env';
+import { requestTag } from './request-context';
 
 /**
  * Mọi lỗi ra khỏi API đều mang đúng một shape (`ApiErrorBody`), để FE chỉ cần
@@ -26,12 +27,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const { status, body } = this.toErrorBody(exception);
 
-    // 5xx là bug của mình → log kèm stack. 4xx là lỗi của request → không cần.
+    // 5xx là bug của mình → log kèm stack.
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(
-        `${request.method} ${request.url} → ${status}`,
+        `${request.method} ${request.url} → ${status}${requestTag()}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
+    } else {
+      // 4xx thì access log đã có dòng riêng, nhưng ở đó chỉ có status code. Lý do
+      // cụ thể ("Cần đăng nhập" hay "Email hoặc mật khẩu không đúng") chỉ tồn tại
+      // ở đây, và nó là thứ duy nhất giúp phân biệt khi đi debug. Để mức debug vì
+      // 401 do access token hết hạn là traffic bình thường của FE.
+      this.logger.debug(`${request.method} ${request.url} → ${status}: ${body.message}${requestTag()}`);
     }
 
     response.status(status).json(body);
@@ -113,7 +120,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
           body: { statusCode: 404, message: 'Không tìm thấy dữ liệu' },
         };
       default:
-        this.logger.error(`Lỗi Prisma chưa xử lý: ${error.code}`, error.stack);
+        this.logger.error(`Lỗi Prisma chưa xử lý: ${error.code}${requestTag()}`, error.stack);
         return {
           status: HttpStatus.INTERNAL_SERVER_ERROR,
           body: {

@@ -1,8 +1,10 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import type { LoginInput, RegisterInput, UserDto } from '@expense/shared';
 import { hash as argonHash, verify as argonVerify } from '@node-rs/argon2';
 import { randomBytes } from 'node:crypto';
 import { DEFAULT_CATEGORIES } from '../categories/default-categories';
+import { maskEmail } from '../common/mask-email';
+import { requestTag } from '../common/request-context';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenService, type IssuedTokens, type TokenContext } from './token.service';
 
@@ -35,6 +37,8 @@ export class AuthService {
    */
   private readonly dummyHash: Promise<string>;
 
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly tokens: TokenService,
@@ -49,6 +53,7 @@ export class AuthService {
     });
 
     if (existing) {
+      this.logger.warn(`Đăng ký trùng email: ${maskEmail(input.email)}${requestTag()}`);
       throw new ConflictException('Email này đã được đăng ký');
     }
 
@@ -104,6 +109,8 @@ export class AuthService {
       return created;
     });
 
+    this.logger.log(`Tài khoản mới: ${maskEmail(user.email)} id=${user.id}${requestTag()}`);
+
     const issued = await this.tokens.issueNewFamily(user.id, user.email, context);
     return { ...issued, user };
   }
@@ -119,8 +126,23 @@ export class AuthService {
     const passwordValid = await argonVerify(passwordHash, input.password).catch(() => false);
 
     if (!user || !passwordValid) {
+      // Log PHÂN BIỆT hai nguyên nhân, dù response thì không (xem `dummyHash`).
+      //
+      // Không mâu thuẫn: cái cần giấu là thông tin trả cho người gọi. Log nằm
+      // phía server, kẻ tấn công không đọc được, nên giấu ở đây chỉ có tác dụng
+      // duy nhất là làm chính mình mù khi debug — đã từng mất công xuống tận DB
+      // mới biết một tài khoản không tồn tại chứ không phải sai mật khẩu.
+      this.logger.warn(
+        `Login thất bại (${user ? 'sai mật khẩu' : 'email chưa đăng ký'}): ` +
+          `${maskEmail(input.email)}${requestTag()}`,
+      );
       throw new UnauthorizedException('Email hoặc mật khẩu không đúng');
     }
+
+    // Access log không nói được ai vừa login: /auth/login là route @Public nên
+    // guard không gắn `user` vào request. Dòng này là chỗ duy nhất nối một
+    // request tới một userId.
+    this.logger.log(`Login thành công: ${maskEmail(user.email)} id=${user.id}${requestTag()}`);
 
     // Dọn token cũ nhân lúc có dịp — không cần cron riêng cho việc này.
     void this.tokens.cleanupExpired().catch(() => undefined);

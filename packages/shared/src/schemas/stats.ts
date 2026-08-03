@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { dateOnlySchema, type TxType } from '../common';
+import { dateOnlySchema, type AccountKind, type TxType } from '../common';
 
 /**
  * Kỳ thống kê. Bỏ trống thì API dùng tháng hiện tại theo giờ Việt Nam.
@@ -9,6 +9,8 @@ export const statsQuerySchema = z
   .object({
     from: dateOnlySchema.optional(),
     to: dateOnlySchema.optional(),
+    /** Bỏ trống = gộp mọi nguồn tiền. */
+    accountId: z.string().min(1).optional(),
   })
   .refine((v) => !v.from || !v.to || v.from <= v.to, {
     message: 'Ngày bắt đầu phải trước ngày kết thúc',
@@ -24,6 +26,7 @@ export const trendQuerySchema = z
   .object({
     from: dateOnlySchema.optional(),
     to: dateOnlySchema.optional(),
+    accountId: z.string().min(1).optional(),
     granularity: trendGranularitySchema,
   })
   .refine((v) => !v.from || !v.to || v.from <= v.to, {
@@ -44,11 +47,34 @@ export interface SummaryDto {
   /** 'YYYY-MM-DD' */
   from: string;
   to: string;
+  /** Thu nhập THẬT: đã loại các khoản nội bộ (`internalKind` khác null). */
   income: number;
+  /**
+   * Chi tiêu THẬT: đã loại các khoản nội bộ. Chi bằng thẻ tín dụng được tính
+   * ngay tại ngày mua (dồn tích), không đợi tới ngày thanh toán sao kê.
+   */
   expense: number;
   /** income - expense. Có thể âm. */
   net: number;
+  /**
+   * Tiền thật sự rời khỏi các nguồn tiền có sẵn trong kỳ.
+   *
+   * Khác `expense` ở hai đầu, và đó là chủ đích:
+   *   - KHÔNG tính khoản mua bằng thẻ tín dụng (tiền chưa đi đâu cả).
+   *   - CÓ tính khoản thanh toán sao kê thẻ (tiền đi thật), dù nó là nội bộ.
+   *   - KHÔNG tính nạp ví / chuyển giữa tài khoản của chính mình, vì tiền vẫn
+   *     nằm trong túi người dùng, chỉ đổi chỗ.
+   */
+  cashOutflow: number;
   transactionCount: number;
+  /**
+   * Các khoản đã bị loại khỏi income/expense vì là dịch chuyển nội bộ. Đưa ra
+   * đây để dashboard nói rõ "đã loại N khoản" thay vì âm thầm giấu tiền đi.
+   */
+  internal: {
+    total: number;
+    count: number;
+  };
   previous: {
     from: string;
     to: string;
@@ -76,6 +102,33 @@ export interface CategoryBreakdownDto {
   to: string;
   expense: CategoryBreakdownItemDto[];
   income: CategoryBreakdownItemDto[];
+}
+
+/**
+ * Chi tiêu chia theo nguồn tiền. Cùng hình dạng với breakdown theo danh mục để
+ * FE dùng chung một component bar.
+ *
+ * `icon`/`color` do API sinh từ `kind` — nguồn tiền không có màu do người dùng
+ * chọn như danh mục, và để FE tự map thì hai đầu sẽ lệch nhau lúc thêm loại mới.
+ */
+export interface AccountBreakdownItemDto {
+  /** null = giao dịch nhập tay không gắn nguồn nào. */
+  accountId: string | null;
+  name: string;
+  kind: AccountKind | null;
+  color: string;
+  icon: string;
+  total: number;
+  /** Tỷ lệ trên tổng chi tiêu thật trong kỳ, 0..1. */
+  share: number;
+  transactionCount: number;
+}
+
+export interface AccountBreakdownDto {
+  from: string;
+  to: string;
+  /** Chỉ chi tiêu thật, đã loại khoản nội bộ. Tổng khớp `SummaryDto.expense`. */
+  expense: AccountBreakdownItemDto[];
 }
 
 export interface TrendPointDto {

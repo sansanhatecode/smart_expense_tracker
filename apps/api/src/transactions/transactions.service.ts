@@ -22,10 +22,14 @@ const TRANSACTION_SELECT = {
   date: true,
   description: true,
   balance: true,
+  internalKind: true,
   importBatchId: true,
   createdAt: true,
   category: {
     select: { id: true, name: true, type: true, icon: true, color: true, sortOrder: true },
+  },
+  account: {
+    select: { id: true, name: true, kind: true },
   },
 } as const;
 
@@ -64,6 +68,10 @@ export class TransactionsService {
       await this.assertOwnsCategory(userId, input.categoryId, input.type);
     }
 
+    if (input.accountId) {
+      await this.assertOwnsAccount(userId, input.accountId);
+    }
+
     const amount = numberToBigint(input.amount);
     const normalizedDescription = normalizeDescription(input.description);
 
@@ -87,11 +95,13 @@ export class TransactionsService {
       data: {
         userId,
         categoryId: input.categoryId,
+        accountId: input.accountId,
         amount,
         type: input.type,
         date: new Date(`${input.date}T00:00:00.000Z`),
         description: input.description,
         balance: input.balance === null ? null : numberToBigint(input.balance),
+        internalKind: input.internalKind,
         dedupeHash: computeDedupeHash({
           userId,
           date: input.date,
@@ -125,6 +135,10 @@ export class TransactionsService {
       await this.assertOwnsCategory(userId, input.categoryId, input.type ?? existing.type);
     }
 
+    if (input.accountId) {
+      await this.assertOwnsAccount(userId, input.accountId);
+    }
+
     /**
      * Cố tình KHÔNG tính lại dedupeHash khi sửa.
      *
@@ -142,9 +156,13 @@ export class TransactionsService {
           : {}),
         ...(input.description !== undefined ? { description: input.description } : {}),
         ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
+        ...(input.accountId !== undefined ? { accountId: input.accountId } : {}),
         ...(input.balance !== undefined
           ? { balance: input.balance === null ? null : numberToBigint(input.balance) }
           : {}),
+        // Van an toàn cho nhận diện sai của import. Ví dụ người dùng trả hộ thẻ
+        // của người khác: đó là chi tiêu thật, và họ phải bỏ đánh dấu được.
+        ...(input.internalKind !== undefined ? { internalKind: input.internalKind } : {}),
       },
       select: TRANSACTION_SELECT,
     });
@@ -207,6 +225,18 @@ export class TransactionsService {
 
     if (query.type) {
       where.type = query.type;
+    }
+
+    if (query.accountId) {
+      where.accountId = query.accountId;
+    }
+
+    // `only` chính là màn hình "các khoản đã bị loại khỏi thống kê" — không cần
+    // dựng route riêng cho nó.
+    if (query.internal === 'only') {
+      where.internalKind = { not: null };
+    } else if (query.internal === 'exclude') {
+      where.internalKind = null;
     }
 
     if (query.importBatchId) {
@@ -279,6 +309,18 @@ export class TransactionsService {
       );
     }
   }
+
+  /** Chặn việc gắn giao dịch vào nguồn tiền của user khác bằng cách nhồi id lạ. */
+  private async assertOwnsAccount(userId: string, accountId: string): Promise<void> {
+    const account = await this.prisma.account.findFirst({
+      where: { id: accountId, userId },
+      select: { id: true },
+    });
+
+    if (!account) {
+      throw new NotFoundException('Không tìm thấy nguồn tiền');
+    }
+  }
 }
 
 function orderByOf(sort: TransactionSort): Prisma.TransactionOrderByWithRelationInput[] {
@@ -307,6 +349,8 @@ function toTransactionDto(row: TransactionRow): TransactionDto {
     description: row.description,
     balance: toNullableMoney(row.balance),
     category: toCategorySummary(row.category),
+    account: row.account,
+    internalKind: row.internalKind,
     importBatchId: row.importBatchId,
     createdAt: row.createdAt.toISOString(),
   };

@@ -337,7 +337,11 @@ function CreateTransactionForm({ onDone }: { onDone: () => void }) {
       date,
       description,
       categoryId: categoryId || null,
+      accountId: null,
       balance: null,
+      // Giao dịch nhập tay mặc định là chi tiêu thật. Đánh dấu nội bộ là việc
+      // sửa sau, ở danh sách — không bắt người dùng nghĩ về nó lúc đang nhập.
+      internalKind: null,
     });
   }
 

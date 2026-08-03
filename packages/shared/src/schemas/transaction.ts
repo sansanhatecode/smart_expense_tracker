@@ -1,9 +1,12 @@
 import { z } from 'zod';
 import {
   dateOnlySchema,
+  internalKindSchema,
   txTypeSchema,
   vndAmountSchema,
   vndBalanceSchema,
+  type AccountKind,
+  type InternalKind,
   type TxType,
 } from '../common';
 import type { CategoryDto } from './category';
@@ -23,14 +26,23 @@ const transactionFields = {
   date: dateOnlySchema,
   description: z.string().trim().min(1, 'Vui lòng nhập mô tả').max(500),
   categoryId: z.string().min(1).nullable(),
+  accountId: z.string().min(1).nullable(),
   balance: vndBalanceSchema.nullable(),
+  /**
+   * Sửa tay được, kể cả set về null. Đây là van an toàn cho nhận diện sai của
+   * import — ví dụ người dùng trả hộ thẻ của người khác, đó là chi tiêu thật.
+   */
+  internalKind: internalKindSchema.nullable(),
 };
 
 export const createTransactionSchema = z.object({
   ...transactionFields,
   // Chỉ create mới có default: bỏ trống nghĩa là "chưa phân loại".
   categoryId: transactionFields.categoryId.default(null),
+  // Bỏ trống = không rõ nguồn; thống kê coi như tài khoản tiền mặt.
+  accountId: transactionFields.accountId.default(null),
   balance: transactionFields.balance.default(null),
+  internalKind: transactionFields.internalKind.default(null),
 });
 
 /** Chỉ những field được gửi lên mới thay đổi. */
@@ -57,6 +69,13 @@ export const transactionQuerySchema = z
     /** 'none' = lọc riêng các giao dịch chưa gán danh mục. */
     uncategorized: z.stringbool().optional(),
     type: txTypeSchema.optional(),
+    accountId: z.string().min(1).optional(),
+    /**
+     * Lọc theo khoản dịch chuyển nội bộ. Bỏ trống = trả về tất cả, vì danh sách
+     * giao dịch là nơi người dùng xem dữ liệu thô, không phải nơi đọc thống kê.
+     * `only` chính là màn hình "các khoản đã bị loại khỏi thống kê".
+     */
+    internal: z.enum(['only', 'exclude']).optional(),
     q: z.string().trim().min(1).max(200).optional(),
     importBatchId: z.string().min(1).optional(),
     sort: transactionSortSchema,
@@ -80,6 +99,10 @@ export interface TransactionDto {
   description: string;
   balance: number | null;
   category: Pick<CategoryDto, 'id' | 'name' | 'type' | 'icon' | 'color'> | null;
+  /** null = giao dịch nhập tay không gắn nguồn tiền nào. */
+  account: { id: string; name: string; kind: AccountKind } | null;
+  /** Khác null = đã bị loại khỏi thống kê thu/chi. */
+  internalKind: InternalKind | null;
   importBatchId: string | null;
   createdAt: string;
 }

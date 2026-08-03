@@ -149,6 +149,10 @@ export class BudgetsService {
         type: 'expense',
         date: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) },
         categoryId: { not: null },
+        // Cùng định nghĩa "chi tiêu thật" với stats. Thiếu điều kiện này thì một
+        // khoản trả nợ thẻ rơi vào danh mục 'Chuyển tiền' sẽ ăn hết ngân sách
+        // của danh mục đó, dù người dùng chưa tiêu thêm đồng nào.
+        internalKind: null,
       },
       _sum: { amount: true },
     });
@@ -174,6 +178,7 @@ export class BudgetsService {
         categoryId,
         type: 'expense',
         date: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) },
+        internalKind: null,
       },
       _sum: { amount: true },
     });

@@ -2,6 +2,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 import {
   statsQuerySchema,
   trendQuerySchema,
+  type AccountBreakdownDto,
   type CategoryBreakdownDto,
   type StatsQuery,
   type SummaryDto,
@@ -30,6 +31,14 @@ export class StatsController {
     @Query(new ZodValidationPipe(statsQuerySchema)) query: StatsQuery,
   ): Promise<CategoryBreakdownDto> {
     return this.stats.byCategory(userId, query);
+  }
+
+  @Get('by-account')
+  byAccount(
+    @CurrentUserId() userId: string,
+    @Query(new ZodValidationPipe(statsQuerySchema)) query: StatsQuery,
+  ): Promise<AccountBreakdownDto> {
+    return this.stats.byAccount(userId, query);
   }
 
   @Get('trend')

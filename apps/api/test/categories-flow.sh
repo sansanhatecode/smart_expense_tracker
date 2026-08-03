@@ -67,7 +67,7 @@ check "danh mục của A vẫn còn" "$(code "$(req GET /api/categories "$A")")
 
 echo "── 4. Rule auto-categorize ────────────────────────────────────────────────"
 R=$(req GET /api/category-rules "$A")
-check "user mới có 121 rule seed" "$(body "$R" | jq_ '.length')" "121"
+check "user mới có 122 rule seed" "$(body "$R" | jq_ '.length')" "122"
 R=$(req POST /api/category-rules "$A" "{\"keyword\":\"quan oc co ba\",\"categoryId\":\"$CAT\",\"priority\":10}")
 check "tạo rule → 201" "$(code "$R")" "201"
 check "keyword được uppercase" "$(body "$R" | jq_ '.keyword')" "QUAN OC CO BA"

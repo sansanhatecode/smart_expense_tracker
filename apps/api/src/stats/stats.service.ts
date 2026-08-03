@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type {
+  AccountBreakdownDto,
+  AccountBreakdownItemDto,
   CategoryBreakdownDto,
   CategoryBreakdownItemDto,
   StatsQuery,
@@ -9,7 +11,7 @@ import type {
   TrendQuery,
 } from '@expense/shared';
 import { Prisma } from '../generated/prisma/client';
-import type { TxType } from '../generated/prisma/enums';
+import type { AccountKind, TxType } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
@@ -21,6 +23,17 @@ import { PrismaService } from '../prisma/prisma.service';
  *
  * `date` là cột DATE nên mọi so sánh và nhóm theo tháng làm trực tiếp trên ngày
  * lịch, không cần `AT TIME ZONE` ở đâu cả. Xem ADR 9.5.
+ *
+ * ─── Chi tiêu THẬT và dòng tiền là hai con số khác nhau ───
+ *
+ * Mọi query thu/chi ở đây đều lọc `internalKind IS NULL`. Tiền chuyển giữa các
+ * nguồn của chính người dùng — trả nợ thẻ, nạp ví — không phải chi tiêu, và
+ * cộng nó vào là đếm hai lần đúng số tiền đã được ghi nhận ở nơi khác.
+ *
+ * `cashOutflow` là câu hỏi khác: tiền thật sự rời khỏi các nguồn có sẵn. Nó
+ * KHÔNG tính khoản mua bằng thẻ (tiền chưa đi đâu cả) nhưng CÓ tính khoản thanh
+ * toán sao kê. Hai con số này lệch nhau là bình thường và có ý nghĩa; ép chúng
+ * về một là thứ đã làm thống kê sai ngay từ đầu.
  */
 @Injectable()
 export class StatsService {
@@ -37,10 +50,13 @@ export class StatsService {
   async summary(userId: string, query: StatsQuery): Promise<SummaryDto> {
     const { from, to } = resolvePeriod(query);
     const previous = previousPeriod(from, to);
+    const account = query.accountId;
 
-    const [current, prior] = await Promise.all([
-      this.sumByType(userId, from, to),
-      this.sumByType(userId, previous.from, previous.to),
+    const [current, prior, cashOutflow, internal] = await Promise.all([
+      this.sumByType(userId, from, to, account),
+      this.sumByType(userId, previous.from, previous.to, account),
+      this.sumCashOutflow(userId, from, to, account),
+      this.sumInternal(userId, from, to, account),
     ]);
 
     return {
@@ -49,7 +65,9 @@ export class StatsService {
       income: current.income,
       expense: current.expense,
       net: current.income - current.expense,
+      cashOutflow,
       transactionCount: current.count,
+      internal,
       previous: {
         from: previous.from,
         to: previous.to,
@@ -58,6 +76,63 @@ export class StatsService {
         net: prior.income - prior.expense,
       },
     };
+  }
+
+  /**
+   * Chi tiêu chia theo nguồn tiền.
+   *
+   * Cùng hình dạng với `byCategory` để FE dùng chung một component bar. Giao
+   * dịch không gắn nguồn (nhập tay) được gộp thành một mục thay vì bị bỏ — cùng
+   * lý do với "Chưa phân loại": bỏ đi thì tổng trên chart không khớp summary.
+   */
+  async byAccount(userId: string, query: StatsQuery): Promise<AccountBreakdownDto> {
+    const { from, to } = resolvePeriod(query);
+
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        accountId: string | null;
+        name: string | null;
+        kind: AccountKind | null;
+        total: bigint;
+        count: bigint;
+      }>
+    >(Prisma.sql`
+      SELECT t."accountId"                 AS "accountId",
+             a."name"                      AS "name",
+             a."kind"                      AS "kind",
+             SUM(t."amount")               AS "total",
+             COUNT(*)                      AS "count"
+        FROM "Transaction" t
+        LEFT JOIN "Account" a ON a."id" = t."accountId"
+       WHERE t."userId" = ${userId}
+         AND t."date" >= ${from}::date
+         AND t."date" <= ${to}::date
+         AND t."type" = 'expense'
+         AND t."internalKind" IS NULL
+         ${accountFilter(query.accountId)}
+       GROUP BY t."accountId", a."name", a."kind"
+       ORDER BY SUM(t."amount") DESC
+    `);
+
+    const grandTotal = rows.reduce((sum, row) => sum + Number(row.total), 0);
+
+    const expense: AccountBreakdownItemDto[] = rows.map((row) => {
+      const total = Number(row.total);
+      const style = row.kind === null ? UNKNOWN_ACCOUNT_STYLE : ACCOUNT_STYLES[row.kind];
+
+      return {
+        accountId: row.accountId,
+        name: row.name ?? 'Không rõ nguồn',
+        kind: row.kind,
+        color: style.color,
+        icon: style.icon,
+        total,
+        share: grandTotal > 0 ? total / grandTotal : 0,
+        transactionCount: Number(row.count),
+      };
+    });
+
+    return { from, to, expense };
   }
 
   /**
@@ -93,6 +168,8 @@ export class StatsService {
        WHERE t."userId" = ${userId}
          AND t."date" >= ${from}::date
          AND t."date" <= ${to}::date
+         AND t."internalKind" IS NULL
+         ${accountFilter(query.accountId)}
        GROUP BY t."categoryId", c."name", c."color", c."icon", t."type"
        ORDER BY SUM(t."amount") DESC
     `);
@@ -134,6 +211,8 @@ export class StatsService {
        WHERE t."userId" = ${userId}
          AND t."date" >= ${from}::date
          AND t."date" <= ${to}::date
+         AND t."internalKind" IS NULL
+         ${accountFilter(query.accountId)}
        GROUP BY 1, 2
        ORDER BY 1 ASC
     `);
@@ -163,6 +242,7 @@ export class StatsService {
     userId: string,
     from: string,
     to: string,
+    accountId?: string,
   ): Promise<{ income: number; expense: number; count: number }> {
     const rows = await this.prisma.$queryRaw<
       Array<{ type: TxType; total: bigint; count: bigint }>
@@ -174,6 +254,8 @@ export class StatsService {
        WHERE t."userId" = ${userId}
          AND t."date" >= ${from}::date
          AND t."date" <= ${to}::date
+         AND t."internalKind" IS NULL
+         ${accountFilter(accountId)}
        GROUP BY t."type"
     `);
 
@@ -190,7 +272,94 @@ export class StatsService {
 
     return { income, expense, count };
   }
+
+  /**
+   * Tiền thật sự rời khỏi các nguồn có sẵn trong kỳ.
+   *
+   * Ba điều kiện, mỗi điều kiện loại đúng một dạng đếm sai:
+   *
+   *   `a."kind" <> 'credit_card'` — khoản mua bằng thẻ chưa làm tiền rời đi
+   *   đâu cả. Nó đã nằm trong `expense` (dồn tích), cộng vào đây nữa là đếm hai
+   *   lần với chính khoản thanh toán sao kê ở dưới.
+   *
+   *   `internalKind IN (NULL, 'card_payment')` — giữ lại khoản trả nợ thẻ vì đó
+   *   là lúc tiền đi thật, nhưng bỏ nạp ví và chuyển giữa tài khoản của chính
+   *   mình: tiền vẫn trong túi người dùng, chỉ đổi chỗ.
+   *
+   *   `a."kind" IS NULL OR …` — giao dịch nhập tay không gắn nguồn được coi như
+   *   tiền mặt. LEFT JOIN mà quên nhánh NULL này thì INNER JOIN ngầm sẽ nuốt
+   *   mất chúng.
+   */
+  private async sumCashOutflow(
+    userId: string,
+    from: string,
+    to: string,
+    accountId?: string,
+  ): Promise<number> {
+    const rows = await this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
+      SELECT COALESCE(SUM(t."amount"), 0) AS "total"
+        FROM "Transaction" t
+        LEFT JOIN "Account" a ON a."id" = t."accountId"
+       WHERE t."userId" = ${userId}
+         AND t."date" >= ${from}::date
+         AND t."date" <= ${to}::date
+         AND t."type" = 'expense'
+         AND (a."kind" IS NULL OR a."kind" <> 'credit_card')
+         AND (t."internalKind" IS NULL OR t."internalKind" = 'card_payment')
+         ${accountFilter(accountId)}
+    `);
+
+    return Number(rows[0]?.total ?? 0);
+  }
+
+  /**
+   * Các khoản đã bị loại khỏi thu/chi vì là dịch chuyển nội bộ.
+   *
+   * Trả ra để dashboard nói được "đã loại N khoản" kèm đường dẫn xem chúng.
+   * Loại tiền khỏi thống kê mà không nói gì là cách nhanh nhất khiến người dùng
+   * mất tin vào con số — nhất là khi nhận diện có thể sai.
+   */
+  private async sumInternal(
+    userId: string,
+    from: string,
+    to: string,
+    accountId?: string,
+  ): Promise<{ total: number; count: number }> {
+    const rows = await this.prisma.$queryRaw<Array<{ total: bigint; count: bigint }>>(Prisma.sql`
+      SELECT COALESCE(SUM(t."amount"), 0) AS "total",
+             COUNT(*)                     AS "count"
+        FROM "Transaction" t
+       WHERE t."userId" = ${userId}
+         AND t."date" >= ${from}::date
+         AND t."date" <= ${to}::date
+         AND t."internalKind" IS NOT NULL
+         ${accountFilter(accountId)}
+    `);
+
+    return { total: Number(rows[0]?.total ?? 0), count: Number(rows[0]?.count ?? 0) };
+  }
 }
+
+/** Mảnh WHERE lọc theo nguồn tiền. `Prisma.empty` khi không lọc — không nội suy chuỗi. */
+function accountFilter(accountId: string | undefined): Prisma.Sql {
+  return accountId === undefined ? Prisma.empty : Prisma.sql`AND t."accountId" = ${accountId}`;
+}
+
+/**
+ * Màu và icon của từng loại nguồn tiền.
+ *
+ * Sinh ở API chứ không để FE tự map: nguồn tiền không có màu do người dùng chọn
+ * như danh mục, nên nếu hai đầu cùng giữ một bảng map thì lúc thêm loại mới sẽ
+ * có một đầu quên.
+ */
+const ACCOUNT_STYLES: Record<AccountKind, { color: string; icon: string }> = {
+  bank: { color: '#0f766e', icon: 'Landmark' },
+  credit_card: { color: '#b45309', icon: 'CreditCard' },
+  wallet: { color: '#6d28d9', icon: 'Wallet' },
+};
+
+/** Giao dịch nhập tay không gắn nguồn — cùng màu xám với "Chưa phân loại". */
+const UNKNOWN_ACCOUNT_STYLE = { color: '#94a3b8', icon: 'CircleHelp' };
 
 function toBreakdownItems(
   rows: Array<{

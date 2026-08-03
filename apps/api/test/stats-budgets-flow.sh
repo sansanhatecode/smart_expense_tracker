@@ -21,6 +21,23 @@ check() {
 code() { echo "$1" | tail -1; }
 body() { echo "$1" | sed '$d'; }
 jq_() { node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log(eval('j$1')??'')}catch(e){console.log('')}})"; }
+
+# CẢNH BÁO khi thêm node -e vào file này: KHÔNG để dấu phẩy bên trong { }.
+#
+# Bash coi `{a,b}` là brace expansion và tách đoạn script thành nhiều từ, kể cả
+# khi nó nằm trong nháy kép. Hậu quả không phải là test đỏ mà là `check` nhận
+# sai vị trí tham số rồi BÁO PASS GIẢ — ba check dưới đây đã im lặng không kiểm
+# gì suốt một thời gian vì lý do đó. Ba helper sau né bằng cách không dùng ngoặc
+# nhọn nào cả.
+sumField() { # sumField <mảng> <field> — đọc JSON từ stdin
+  node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.parse(s)['$1'].reduce((a,x)=>a+x['$2'],0)))"
+}
+sumShare() { # tổng share, làm tròn 3 chữ số
+  node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(Math.round(JSON.parse(s).expense.reduce((a,x)=>a+x.share,0)*1000)/1000))"
+}
+isSortedDesc() { # 'yes' nếu mảng expense đã giảm dần theo total
+  node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>console.log(JSON.stringify(JSON.parse(s).expense.map(x=>x.total))===JSON.stringify(JSON.parse(s).expense.map(x=>x.total).sort((a,b)=>b-a))?'yes':'no'))"
+}
 register() {
   curl -s -X POST "$API/auth/register" -H 'Content-Type: application/json' \
     -d "{\"email\":\"$1\",\"password\":\"$PASS\"}" | jq_ '.accessToken'
@@ -103,11 +120,9 @@ check "  đếm đúng 2 giao dịch" \
 check "giao dịch chưa phân loại VẪN hiện, không bị bỏ" \
   "$(body "$C" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log(j.expense.find(x=>x.name==='Chưa phân loại')?.total ?? 'thiếu')})")" "100000"
 check "tổng breakdown chi khớp với summary (1.100.000)" \
-  "$(body "$C" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log(j.expense.reduce((a,x)=>a+x.total,0))})")" "1100000"
-check "share cộng lại = 1" \
-  "$(body "$C" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log(Math.round(j.expense.reduce((a,x)=>a+x.share,0)*1000)/1000)})")" "1"
-check "sắp xếp giảm dần theo tổng" \
-  "$(body "$C" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);const t=j.expense.map(x=>x.total);console.log(JSON.stringify(t)===JSON.stringify([...t].sort((a,b)=>b-a))?'yes':'no')})")" "yes"
+  "$(body "$C" | sumField expense total)" "1100000"
+check "share cộng lại = 1" "$(body "$C" | sumShare)" "1"
+check "sắp xếp giảm dần theo tổng" "$(body "$C" | isSortedDesc)" "yes"
 
 echo "── 5. Trend ───────────────────────────────────────────────────────────────"
 T=$(req GET "/api/stats/trend?from=2026-06-01&to=2026-08-31&granularity=month" "$TOKEN")
@@ -150,7 +165,33 @@ check "  status = over" "$(body "$A" | jq_ '[0].status')" "over"
 check "list trả cả 2 ngân sách" \
   "$(req GET "/api/budgets?month=2026-07" "$TOKEN" | sed '$d' | jq_ '.length')" "2"
 
-echo "── 8. Cô lập dữ liệu giữa user ────────────────────────────────────────────"
+echo "── 8. Khoản nội bộ không chạm vào thống kê lẫn ngân sách ──────────────────"
+# Một khoản chuyển tiền nội bộ 5tr rơi vào danh mục Ăn uống. Nếu nó được tính,
+# ngân sách 500k của Ăn uống sẽ hiện 5,8tr đã chi trong khi người dùng chưa ăn
+# thêm gì — đó là điều đã xảy ra trước khi có internalKind.
+INT=$(req POST /api/transactions "$TOKEN" \
+  "{\"amount\":5000000,\"type\":\"expense\",\"date\":\"2026-07-18\",\"description\":\"Chuyen noi bo\",\"categoryId\":\"$AN_UONG\",\"internalKind\":\"self_transfer\"}")
+check "tạo giao dịch nội bộ → 201" "$(code "$INT")" "201"
+check "  DTO mang internalKind" "$(body "$INT" | jq_ '.internalKind')" "self_transfer"
+S=$(req GET "/api/stats/summary?from=2026-07-01&to=2026-07-31" "$TOKEN")
+check "tổng chi KHÔNG đổi, vẫn 1.100.000" "$(body "$S" | jq_ '.expense')" "1100000"
+check "nó được đếm riêng ở internal" "$(body "$S" | jq_ '.internal.count')" "1"
+check "  kèm số tiền" "$(body "$S" | jq_ '.internal.total')" "5000000"
+# Nhập tay không gắn nguồn → coi như tiền mặt, vẫn là tiền rời túi.
+check "dòng tiền ra = 1.100.000, không gồm khoản nội bộ" "$(body "$S" | jq_ '.cashOutflow')" "1100000"
+C=$(req GET "/api/stats/by-category?from=2026-07-01&to=2026-07-31" "$TOKEN")
+check "breakdown: Ăn uống vẫn 800.000" \
+  "$(body "$C" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log(j.expense.find(x=>x.name==='Ăn uống').total)})")" "800000"
+check "ngân sách Ăn uống vẫn tính 800.000" \
+  "$(req GET "/api/budgets?month=2026-07" "$TOKEN" | sed '$d' | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log(j.find(b=>b.category.name==='Ăn uống').spent)})")" "800000"
+check "bỏ đánh dấu thì nó được tính lại" \
+  "$(code "$(req PATCH "/api/transactions/$(body "$INT" | jq_ '.id')" "$TOKEN" '{"internalKind":null}')")" "200"
+check "  tổng chi thành 6.100.000" \
+  "$(req GET "/api/stats/summary?from=2026-07-01&to=2026-07-31" "$TOKEN" | sed '$d' | jq_ '.expense')" "6100000"
+# Trả lại như cũ cho phần sau
+req PATCH "/api/transactions/$(body "$INT" | jq_ '.id')" "$TOKEN" '{"internalKind":"self_transfer"}' >/dev/null
+
+echo "── 9. Cô lập dữ liệu giữa user ────────────────────────────────────────────"
 check "user khác: summary = 0" \
   "$(req GET "/api/stats/summary?from=2026-07-01&to=2026-07-31" "$OTHER_TOKEN" | sed '$d' | jq_ '.expense')" "0"
 check "user khác: breakdown rỗng" \

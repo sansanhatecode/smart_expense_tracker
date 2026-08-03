@@ -23,6 +23,18 @@ export const vndBalanceSchema = z
 export const txTypeSchema = z.enum(['income', 'expense']);
 export type TxType = z.infer<typeof txTypeSchema>;
 
+/** Loại nguồn tiền. Xem docblock enum `AccountKind` trong schema.prisma. */
+export const accountKindSchema = z.enum(['bank', 'credit_card', 'wallet']);
+export type AccountKind = z.infer<typeof accountKindSchema>;
+
+/**
+ * Vì sao một giao dịch là tiền dịch chuyển nội bộ chứ không phải chi tiêu/thu
+ * nhập thật. `null` = giao dịch thật. Độc lập với `txType`: một khoản trả nợ
+ * thẻ vừa có chiều (ra khỏi tài khoản, vào thẻ) vừa là nội bộ.
+ */
+export const internalKindSchema = z.enum(['card_payment', 'wallet_topup', 'self_transfer']);
+export type InternalKind = z.infer<typeof internalKindSchema>;
+
 export const importSourceSchema = z.enum(['csv', 'xlsx', 'pdf']);
 export type ImportSource = z.infer<typeof importSourceSchema>;
 

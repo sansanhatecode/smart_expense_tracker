@@ -15,6 +15,7 @@
 export * from './money';
 export * from './common';
 export * from './schemas/auth';
+export * from './schemas/account';
 export * from './schemas/category';
 export * from './schemas/transaction';
 export * from './schemas/import';

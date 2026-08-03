@@ -25,6 +25,7 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  accounts      Account[]
   categories    Category[]
   categoryRules CategoryRule[]
   transactions  Transaction[]
@@ -104,6 +105,50 @@ model CategoryRule {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Nguồn tiền
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Nơi tiền nằm: một tài khoản ngân hàng, một thẻ tín dụng, một ví điện tử.
+///
+/// Chỉ là cái NHÃN — không số thẻ, không credential, không kết nối ngân hàng.
+/// Tồn tại vì không có nó thì chi tiêu bằng thẻ và chi tiêu từ tài khoản bị gộp
+/// làm một, và khoản trả nợ thẻ không phân biệt được với một khoản chi thật.
+///
+/// Được tạo tự động lúc import, người dùng chỉ sửa lại tên nếu muốn.
+model Account {
+  id     String @id @default(cuid())
+  userId String
+
+  name String
+  kind AccountKind
+
+  /// Khoá ổn định để lần import sau map vào đúng account đã có, thay vì đẻ ra
+  /// một account mới theo từng tên file. Dạng `${bankProfile}:${kind}`.
+  fingerprint String
+
+  /// CHỈ có nghĩa với `credit_card`: dư nợ TRƯỚC giao dịch sớm nhất đã import.
+  /// Mặc định 0 — thà hiện một con số thiếu phần lịch sử chưa import còn hơn
+  /// bắt người dùng nhập số dư trước khi được xem bất cứ thứ gì.
+  openingBalance BigInt @default(0)
+
+  /// Ngày chốt sao kê / ngày đến hạn trong tháng, 1-31. Chỉ dùng để hiển thị kỳ
+  /// và nhắc hạn, không tham gia tính toán số tiền.
+  statementDay Int?
+  dueDay       Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  staged       StagedTransaction[]
+  batches      ImportBatch[]
+
+  @@unique([userId, fingerprint])
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Giao dịch
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -112,11 +157,19 @@ model Transaction {
 
   userId     String
   categoryId String?
+  /// Nguồn tiền. NULL với giao dịch nhập tay không chỉ định nguồn — thống kê
+  /// coi những dòng đó như tài khoản tiền mặt.
+  accountId  String?
 
   /// Số nguyên VND, LUÔN > 0 (CHECK constraint trong migration).
   /// Chiều thu/chi nằm ở `type`, không nằm ở dấu. Xem ADR 9.4.
   amount BigInt
   type   TxType
+
+  /// Chiều thứ hai, độc lập với `type`: dòng này là tiền dịch chuyển giữa các
+  /// nguồn của chính người dùng chứ không phải chi tiêu/thu nhập thật. NULL =
+  /// giao dịch thật. Mọi query thống kê đều lọc `internalKind IS NULL`.
+  internalKind InternalKind?
 
   /// Ngày lịch, KHÔNG phải instant — nên không có bug timezone. Xem ADR 9.5.
   date        DateTime @db.Date
@@ -136,12 +189,17 @@ model Transaction {
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   category    Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  account     Account?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
   importBatch ImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
 
   @@unique([userId, dedupeHash])
   @@index([userId, date])
   @@index([userId, categoryId])
   @@index([userId, type, date])
+  @@index([userId, accountId, date])
+  /// `internalKind IS NULL` nằm trong WHERE của mọi query thống kê sau thay đổi
+  /// này, nên nó phải đứng trước `type` trong index.
+  @@index([userId, internalKind, type, date])
   @@index([importBatchId])
 }
 
@@ -155,6 +213,8 @@ model ImportBatch {
   source      ImportSource
   fileName    String
   bankProfile String?
+  /// Nguồn tiền suy ra từ file. Cả batch chung một account.
+  accountId   String?
   /// Số dòng parse được từ file
   rowCount    Int
   status      ImportStatus @default(pending)
@@ -162,6 +222,7 @@ model ImportBatch {
   confirmedAt DateTime?
 
   user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account      Account?            @relation(fields: [accountId], references: [id], onDelete: SetNull)
   staged       StagedTransaction[]
   transactions Transaction[]
 
@@ -183,12 +244,15 @@ model StagedTransaction {
   rowIndex Int
 
   categoryId String?
+  accountId  String?
   amount     BigInt
   type       TxType
   date       DateTime @db.Date
   description String
   balance    BigInt?
   dedupeHash String
+
+  internalKind InternalKind?
 
   duplicate DuplicateKind @default(none)
   /// User có thể bỏ tick dòng không muốn import
@@ -198,6 +262,7 @@ model StagedTransaction {
 
   batch    ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
   category Category?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  account  Account?    @relation(fields: [accountId], references: [id], onDelete: SetNull)
 
   @@index([batchId, rowIndex])
 }
@@ -232,6 +297,38 @@ model Budget {
 enum TxType {
   income
   expense
+}
+
+/// Loại nguồn tiền. Quyết định cách một dòng được diễn giải:
+///
+///   bank / wallet — tiền có sẵn; chi từ đây là tiền rời tài khoản ngay.
+///   credit_card   — tiền đi vay; chi từ đây tính vào chi tiêu ngay tại ngày
+///                   mua (dồn tích), còn tiền chỉ thật sự rời tài khoản khi
+///                   thanh toán sao kê — và khoản đó là `card_payment`, không
+///                   phải một khoản chi mới.
+enum AccountKind {
+  bank
+  credit_card
+  wallet
+}
+
+/// Vì sao một dòng KHÔNG phải chi tiêu/thu nhập thật, mà chỉ là tiền dịch
+/// chuyển giữa các nguồn của chính người dùng.
+///
+/// Cố tình tách khỏi `TxType` thay vì thêm giá trị `transfer` vào đó: chiều
+/// tiền vẫn cần thiết cho mọi dòng (trả nợ thẻ là tiền RA khỏi tài khoản ngân
+/// hàng và tiền VÀO thẻ), và `Category.type` cũng dùng `TxType` — nhét
+/// `transfer` vào enum đó sẽ kéo theo khái niệm "danh mục chuyển khoản" vô nghĩa.
+///
+/// KHÔNG có giá trị cho rút tiền ATM. Không có tài khoản tiền mặt để tiền chảy
+/// vào, nên đánh dấu nội bộ sẽ làm khoản đó biến mất khỏi mọi thống kê.
+enum InternalKind {
+  /// Thanh toán sao kê thẻ tín dụng, ở cả hai vế của giao dịch.
+  card_payment
+  /// Nạp tiền vào ví điện tử từ tài khoản ngân hàng.
+  wallet_topup
+  /// Chuyển giữa hai tài khoản của chính người dùng.
+  self_transfer
 }
 
 enum ImportSource {

@@ -110,6 +110,20 @@ export default function DashboardPage() {
       }),
   });
 
+  /**
+   * Link từ một ô KPI sang danh sách giao dịch đứng sau con số đó.
+   *
+   * Luôn mang theo kỳ và nguồn tiền đang xem — thiếu chúng thì danh sách trả về
+   * một tập khác hẳn và người dùng bấm vào con số 55 triệu để thấy tổng khác.
+   * Phần `params` là điều kiện riêng của từng ô, xem từng chỗ gọi.
+   */
+  const txLink = (params: Record<string, string>) =>
+    `/transactions?${new URLSearchParams({
+      ...period,
+      ...(accountId ? { accountId } : {}),
+      ...params,
+    }).toString()}`;
+
   const isCurrentMonth = month === currentMonthKey();
   const noData = summary.data?.transactionCount === 0;
   // Một nguồn tiền thì không có gì để lọc — dropdown chỉ thêm nhiễu.
@@ -199,6 +213,8 @@ export default function DashboardPage() {
                   previous={summary.data.previous.income}
                   tone="income"
                   upIsGood
+                  hint="Tiền vào các nguồn của bạn trong kỳ. Không tính tiền bạn chuyển giữa hai nguồn của chính mình — đó không phải thu nhập."
+                  href={txLink({ type: 'income', internal: 'exclude' })}
                 />
                 <StatTile
                   label="Chi tiêu"
@@ -206,19 +222,32 @@ export default function DashboardPage() {
                   previous={summary.data.previous.expense}
                   tone="expense"
                   upIsGood={false}
+                  hint="Chi tiêu thật, tính theo ngày phát sinh: quẹt thẻ tín dụng được tính ngay tại ngày mua, kể cả khi tháng sau mới trả. Không gồm khoản chuyển nội bộ."
+                  href={txLink({ type: 'expense', internal: 'exclude' })}
                 />
                 {/*
                   Hai con số chi cạnh nhau là có chủ ý, không phải trùng lặp:
                   "Chi tiêu" tính khoản quẹt thẻ ngay tại ngày mua, còn "Tiền đã
                   ra" chỉ đếm lúc tiền thật sự rời tài khoản. Tháng tiêu nhiều
                   bằng thẻ thì hai số lệch nhau, và đó chính là thông tin.
+
+                  Link của ô này KHÔNG mang internal=exclude như ba ô kia: khoản
+                  trả sao kê thẻ là khoản nội bộ nhưng lại nằm TRONG con số này.
+                  `cashflow=out` mang đúng định nghĩa đó sang danh sách.
                 */}
-                <StatTile label="Tiền đã ra" value={summary.data.cashOutflow} />
+                <StatTile
+                  label="Tiền đã ra"
+                  value={summary.data.cashOutflow}
+                  hint="Tiền thật sự rời khỏi các nguồn của bạn: chi bằng tiền mặt, tài khoản, ví — cộng số đã trả sao kê thẻ trong kỳ. Khoản quẹt thẻ chưa tới hạn trả không tính ở đây, nên số này lệch với Chi tiêu là bình thường."
+                  href={txLink({ cashflow: 'out' })}
+                />
                 <StatTile
                   label="Còn lại"
                   value={summary.data.net}
                   previous={summary.data.previous.net}
                   upIsGood
+                  hint="Tổng thu trừ Chi tiêu của kỳ này. Số âm nghĩa là kỳ này tiêu nhiều hơn thu — không phải số dư còn lại trong tài khoản."
+                  href={txLink({ internal: 'exclude' })}
                 />
               </>
             )}

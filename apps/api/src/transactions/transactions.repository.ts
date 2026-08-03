@@ -229,6 +229,27 @@ function buildWhere(userId: string, query: TransactionQuery): Prisma.Transaction
     where.internalKind = null;
   }
 
+  /*
+   * `cashflow=out`: tiền thật sự rời khỏi các nguồn có sẵn. Bỏ khoản quẹt thẻ
+   * tín dụng (lúc đó tiền chưa đi đâu, chỉ là nợ) nhưng GIỮ khoản trả sao kê —
+   * đó mới là lúc tiền đi. Phải khớp từng điều kiện với `sumCashOutflow` ở
+   * stats.repository.ts, vì đây là danh sách đứng sau con số đó; hai bên lệch
+   * nhau thì người dùng bấm vào và thấy tổng khác con số vừa đọc.
+   *
+   * Điều kiện đi vào `AND` chứ không ghi thẳng lên `where.internalKind`: giữ
+   * như vậy thì `internal` của người dùng vẫn giao được với nó một cách có
+   * nghĩa (exclude → chỉ khoản chi thường, only → chỉ khoản trả sao kê) thay vì
+   * cái nọ âm thầm ghi đè cái kia. `type` thì bị đè, vì "tiền đã ra" tự nó đã
+   * là một chiều tiền.
+   */
+  if (query.cashflow === 'out') {
+    where.type = 'expense';
+    where.AND = [
+      { OR: [{ accountId: null }, { account: { kind: { not: 'credit_card' } } }] },
+      { OR: [{ internalKind: null }, { internalKind: 'card_payment' }] },
+    ];
+  }
+
   if (query.importBatchId) {
     where.importBatchId = query.importBatchId;
   }

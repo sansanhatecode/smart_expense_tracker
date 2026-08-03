@@ -8,7 +8,9 @@ import {
   type CategoryBreakdownItemDto,
   type TrendPointDto,
 } from '@expense/shared';
-import { TrendingDown, TrendingUp } from 'lucide-react';
+import { ArrowUpRight, Info, TrendingDown, TrendingUp } from 'lucide-react';
+import Link from 'next/link';
+import { useId } from 'react';
 import {
   CartesianGrid,
   Line,
@@ -39,6 +41,18 @@ import { CategoryIcon, StatusBadge } from './ui';
 
 // ─── Stat tile ───────────────────────────────────────────────────────────────
 
+/**
+ * Một con số KPI.
+ *
+ * `hint` là chú thích "con số này đếm những gì" — bốn ô KPI cạnh nhau đều là
+ * tiền và trông như bốn cách cộng cùng một tập giao dịch, trong khi thật ra mỗi
+ * ô loại một nhóm khác nhau. Không nói ra thì người dùng tự đoán, và đoán sai
+ * thì họ kết luận app tính sai.
+ *
+ * `href` trỏ sang danh sách giao dịch đã lọc đúng nhóm đứng sau con số. Chỉ
+ * truyền khi bộ lọc đó cho ra ĐÚNG tập giao dịch đã cộng thành số này — link ra
+ * một danh sách gần đúng thì tệ hơn không có link.
+ */
 export function StatTile({
   label,
   value,
@@ -46,13 +60,18 @@ export function StatTile({
   tone = 'neutral',
   /** true khi tăng là điều tốt (thu), false khi tăng là điều xấu (chi). */
   upIsGood,
+  hint,
+  href,
 }: {
   label: string;
   value: number;
   previous?: number;
   tone?: 'income' | 'expense' | 'neutral';
   upIsGood?: boolean;
+  hint?: string;
+  href?: string;
 }) {
+  const hintId = useId();
   const change = previous === undefined ? null : percentChange(value, previous);
 
   const valueColor =
@@ -64,9 +83,18 @@ export function StatTile({
           ? 'var(--delta-bad)'
           : 'var(--ink)';
 
-  return (
-    <div className="border bg-surface p-4" style={{ borderRadius: 'var(--radius)' }}>
-      <p className="text-sm text-ink-secondary">{label}</p>
+  const body = (
+    <>
+      <p className="flex items-center gap-1.5 text-sm text-ink-secondary">
+        {label}
+        {hint && <Info aria-hidden className="size-3.5 shrink-0 text-ink-muted" />}
+        {href && (
+          <ArrowUpRight
+            aria-hidden
+            className="ml-auto size-4 shrink-0 text-ink-muted opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          />
+        )}
+      </p>
       {/*
         Số lớn dùng figure tỷ lệ (không tabular-nums): tabular cho mọi chữ số bề
         rộng của '0' nên ở cỡ lớn số trông rời rạc.
@@ -79,6 +107,51 @@ export function StatTile({
       )}
       {change === null && previous !== undefined && (
         <p className="mt-1.5 text-sm text-ink-muted">Kỳ trước không có dữ liệu</p>
+      )}
+    </>
+  );
+
+  return (
+    <div className="group relative">
+      {href ? (
+        <Link
+          href={href}
+          aria-describedby={hint ? hintId : undefined}
+          className="block h-full border bg-surface p-4 transition-colors hover:bg-surface-raised"
+          style={{ borderRadius: 'var(--radius)' }}
+        >
+          {body}
+          {/* Nói rõ link dẫn tới đâu: tên của link nếu chỉ đọc nội dung là một
+              nhãn cộng một số tiền, nghe không ra là đi được đâu. */}
+          <span className="sr-only">— xem danh sách giao dịch</span>
+        </Link>
+      ) : (
+        <div
+          className="h-full border bg-surface p-4"
+          style={{ borderRadius: 'var(--radius)' }}
+          // Ô không phải link vẫn phải tới được bằng bàn phím khi có chú thích,
+          // nếu không thì hint chỉ tồn tại cho người dùng chuột.
+          tabIndex={hint ? 0 : undefined}
+          aria-describedby={hint ? hintId : undefined}
+        >
+          {body}
+        </div>
+      )}
+
+      {/*
+        Hiện/ẩn bằng opacity chứ không phải `hidden`: aria-describedby cần node
+        này ở lại trong cây a11y để screen reader đọc được chú thích. Tooltip
+        không nhận chuột nên nó không che mất chính ô đang hover.
+      */}
+      {hint && (
+        <span
+          id={hintId}
+          role="tooltip"
+          className="pointer-events-none absolute left-0 right-0 top-full z-20 mt-1.5 border bg-surface-raised p-3 text-sm text-ink-secondary opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          style={{ borderRadius: 'var(--radius-sm)' }}
+        >
+          {hint}
+        </span>
       )}
     </div>
   );

@@ -39,9 +39,31 @@ interface Filters {
   uncategorized: boolean;
   accountId: string;
   internal: '' | 'only' | 'exclude';
+  /** 'out' = chỉ khoản làm tiền rời khỏi nguồn. Loại trừ với `type`, xem `TYPE_OPTIONS`. */
+  cashflow: '' | 'out';
   q: string;
   page: number;
 }
+
+/**
+ * Ô "Loại" gộp cả chiều tiền và "tiền đã ra" vào một select.
+ *
+ * Ba lựa chọn đầu lọc theo cột `type`, còn "Tiền đã ra" là một định nghĩa khác
+ * (bỏ khoản quẹt thẻ, giữ khoản trả sao kê) nên nó đi bằng tham số `cashflow`.
+ * Gộp vì với người dùng cả bốn đều trả lời cùng một câu "cho tôi xem loại tiền
+ * nào" — tách thành hai select cạnh nhau thì phải giải thích vì sao chọn cái
+ * này lại phải bỏ cái kia.
+ */
+const TYPE_OPTIONS = [
+  { value: '', label: 'Tất cả', patch: { type: '', cashflow: '' } },
+  { value: 'expense', label: 'Chi', patch: { type: 'expense', cashflow: '' } },
+  { value: 'income', label: 'Thu', patch: { type: 'income', cashflow: '' } },
+  { value: 'cash_out', label: 'Tiền đã ra', patch: { type: '', cashflow: 'out' } },
+] as const satisfies ReadonlyArray<{
+  value: string;
+  label: string;
+  patch: Pick<Filters, 'type' | 'cashflow'>;
+}>;
 
 /** Nhãn của từng lý do "đây là tiền đổi chỗ, không phải chi tiêu". */
 const INTERNAL_LABEL: Record<InternalKind, string> = {
@@ -52,7 +74,7 @@ const INTERNAL_LABEL: Record<InternalKind, string> = {
 
 /**
  * useSearchParams cần Suspense trong app router, nếu không `next build` sẽ báo
- * lỗi prerender. Nó có ở đây vì dashboard link sang `?internal=only`.
+ * lỗi prerender. Nó có ở đây vì các ô KPI của dashboard link sang đây kèm filter.
  */
 export default function TransactionsPage() {
   return (
@@ -66,17 +88,22 @@ function TransactionsView() {
   const month = currentMonthRange();
   const searchParams = useSearchParams();
   const initialInternal = searchParams.get('internal');
+  const initialType = searchParams.get('type');
 
   const [filters, setFilters] = useState<Filters>({
     // Kỳ đến từ URL nếu có: dashboard link sang đây với đúng tháng đang xem, và
     // rơi về tháng hiện tại sẽ cho danh sách rỗng ngay sau khi vừa nói có N khoản.
     from: searchParams.get('from') ?? month.from,
     to: searchParams.get('to') ?? month.to,
-    type: '',
+    // Giá trị lạ trong URL rơi về "Tất cả" chứ không đi tiếp vào query: API
+    // validate bằng zod nên `?type=abc` sẽ thành 400, và người dùng thấy màn
+    // hình lỗi thay vì một danh sách.
+    type: initialType === 'income' || initialType === 'expense' ? initialType : '',
     categoryId: '',
     uncategorized: false,
-    accountId: '',
+    accountId: searchParams.get('accountId') ?? '',
     internal: initialInternal === 'only' || initialInternal === 'exclude' ? initialInternal : '',
+    cashflow: searchParams.get('cashflow') === 'out' ? 'out' : '',
     q: '',
     page: 1,
   });
@@ -101,6 +128,7 @@ function TransactionsView() {
         uncategorized: filters.uncategorized ? 'true' : undefined,
         accountId: filters.accountId || undefined,
         internal: filters.internal || undefined,
+        cashflow: filters.cashflow || undefined,
         q: filters.q || undefined,
         page: filters.page,
         limit: PAGE_SIZE,
@@ -184,12 +212,17 @@ function TransactionsView() {
           </Field>
           <Field label="Loại">
             <Select
-              value={filters.type}
-              onChange={(e) => update({ type: e.target.value as Filters['type'] })}
+              value={filters.cashflow === 'out' ? 'cash_out' : filters.type}
+              onChange={(e) => {
+                const option = TYPE_OPTIONS.find((item) => item.value === e.target.value);
+                if (option) update(option.patch);
+              }}
             >
-              <option value="">Tất cả</option>
-              <option value="expense">Chi</option>
-              <option value="income">Thu</option>
+              {TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </Select>
           </Field>
           <Field label="Danh mục">
@@ -251,6 +284,18 @@ function TransactionsView() {
             </div>
           </Field>
         </div>
+
+        {/* Bấm "Tiền đã ra" ở Tổng quan là tới đây. Nói ngay danh sách này đang
+            đếm gì, vì nó vừa thiếu khoản quẹt thẻ vừa thêm khoản trả sao kê —
+            không giải thích thì trông như filter bị lỗi. */}
+        {filters.cashflow === 'out' && (
+          <p className="mt-3 text-sm text-ink-secondary">
+            Đang xem các khoản làm tiền rời khỏi nguồn của bạn. Không gồm khoản
+            quẹt thẻ tín dụng chưa trả, nhưng có gồm khoản trả sao kê thẻ. Tổng
+            của danh sách này khớp với ô{' '}
+            <span className="font-medium text-ink">Tiền đã ra</span> ở Tổng quan.
+          </p>
+        )}
 
         {filters.internal === 'only' && (
           <p className="mt-3 text-sm text-ink-secondary">

@@ -76,6 +76,14 @@ export const transactionQuerySchema = z
      * `only` chính là màn hình "các khoản đã bị loại khỏi thống kê".
      */
     internal: z.enum(['only', 'exclude']).optional(),
+    /**
+     * `out` = chỉ những khoản làm tiền RỜI KHỎI nguồn có sẵn — cùng định nghĩa
+     * với `cashOutflow` ở thống kê (xem stats.repository.ts). Tồn tại để ô
+     * "Tiền đã ra" ở Tổng quan bấm được sang danh sách: không có nó thì không
+     * tổ hợp filter nào cho ra đúng nhóm giao dịch đứng sau con số đó, và một
+     * link ra danh sách lệch số còn tệ hơn không có link.
+     */
+    cashflow: z.enum(['out']).optional(),
     q: z.string().trim().min(1).max(200).optional(),
     importBatchId: z.string().min(1).optional(),
     sort: transactionSortSchema,

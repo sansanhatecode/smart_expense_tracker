@@ -59,6 +59,8 @@ export interface ParseResult {
   skipped: SkippedRow[];
   /** Profile thực sự được dùng, sau khi dò. */
   profileId: string;
+  /** File có đủ các cột trong `signatureColumns` của profile không. */
+  signatureMatched: boolean;
 }
 
 /**
@@ -99,6 +101,20 @@ export interface BankProfile {
    * này, và tiền của chúng chưa bao giờ chuyển đi.
    */
   statusColumn?: string[];
+
+  /**
+   * Cột PHẢI có mặt thì profile này mới coi là "nhận ra" file.
+   *
+   * Tồn tại vì số dòng đọc được không đủ để phân biệt: profile generic đọc trọn
+   * một file MoMo y như profile MoMo, và vì generic được thử trước nên nó luôn
+   * thắng khi hoà. Trước đây điều đó vô hại — hai profile cho cùng kết quả. Giờ
+   * thì không: loại nguồn tiền suy ra TỪ profile, nên file MoMo bị xếp thành tài
+   * khoản ngân hàng, gộp chung với ngân hàng thật và khoản nạp ví thành thu nhập.
+   *
+   * Chữ ký chỉ phá thế hoà, KHÔNG lấn số dòng: một profile đọc được nhiều dòng
+   * hơn vẫn thắng, vì đọc sót dữ liệu tệ hơn là gọi sai tên nguồn tiền.
+   */
+  signatureColumns?: string[];
 
   /** 'DD/MM/YYYY' | 'YYYY-MM-DD' | 'DD-MM-YYYY' | 'MM/DD/YYYY' | 'DD/MM/YY' */
   dateFormat: string;

@@ -1,6 +1,8 @@
 'use client';
 
 import type {
+  AccountBreakdownDto,
+  AccountDto,
   BudgetAlertDto,
   CategoryBreakdownDto,
   SummaryDto,
@@ -10,7 +12,7 @@ import type {
 } from '@expense/shared';
 import { formatVnd } from '@expense/shared';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, Upload, Wallet } from 'lucide-react';
+import { ArrowRight, Shuffle, Upload, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 import { api } from '@/lib/api';
@@ -23,8 +25,10 @@ import {
   monthRange,
 } from '@/lib/utils';
 import {
+  accountBar,
+  BreakdownBars,
   BudgetAlertRow,
-  CategoryBars,
+  categoryBar,
   StatTile,
   TrendChart,
 } from '@/components/charts';
@@ -46,24 +50,43 @@ const MONTH_COUNT = 12;
 const TREND_MONTHS = 6;
 
 export default function DashboardPage() {
-  // Cả trang xoay quanh một tháng: KPI, danh mục, cảnh báo ngân sách và danh
-  // sách giao dịch đều đọc từ đây, nên không kỳ nào lệch kỳ nào.
+  // Cả trang xoay quanh một tháng và một nguồn tiền: KPI, danh mục, cảnh báo
+  // ngân sách và danh sách giao dịch đều đọc từ đây, nên không kỳ nào lệch kỳ nào.
   const [month, setMonth] = useState(currentMonthKey());
+  const [accountId, setAccountId] = useState('');
   const period = monthRange(month);
+
+  // Bộ tham số chung cho mọi query thống kê. Nó cũng là queryKey, nên đổi nguồn
+  // tiền là tự refetch — không cần nhớ thêm accountId vào từng key một.
+  const statsParams = { ...period, ...(accountId ? { accountId } : {}) };
 
   // Chart kết thúc ở tháng đang xem chứ không phải tháng hiện tại — xem lại
   // tháng 3 thì phải thấy đường đi dẫn tới tháng 3.
   const trendFrom = addMonths(month, -(TREND_MONTHS - 1));
-  const trend = { from: monthRange(trendFrom).from, to: period.to };
+  const trend = {
+    from: monthRange(trendFrom).from,
+    to: period.to,
+    ...(accountId ? { accountId } : {}),
+  };
+
+  const accounts = useQuery({
+    queryKey: ['accounts'],
+    queryFn: () => api.get<AccountDto[]>('/api/accounts'),
+  });
 
   const summary = useQuery({
-    queryKey: ['stats', 'summary', period],
-    queryFn: () => api.get<SummaryDto>('/api/stats/summary', period),
+    queryKey: ['stats', 'summary', statsParams],
+    queryFn: () => api.get<SummaryDto>('/api/stats/summary', statsParams),
   });
 
   const breakdown = useQuery({
-    queryKey: ['stats', 'by-category', period],
-    queryFn: () => api.get<CategoryBreakdownDto>('/api/stats/by-category', period),
+    queryKey: ['stats', 'by-category', statsParams],
+    queryFn: () => api.get<CategoryBreakdownDto>('/api/stats/by-category', statsParams),
+  });
+
+  const byAccount = useQuery({
+    queryKey: ['stats', 'by-account', statsParams],
+    queryFn: () => api.get<AccountBreakdownDto>('/api/stats/by-account', statsParams),
   });
 
   const trendData = useQuery({
@@ -78,10 +101,10 @@ export default function DashboardPage() {
   });
 
   const recent = useQuery({
-    queryKey: ['transactions', 'recent', period],
+    queryKey: ['transactions', 'recent', statsParams],
     queryFn: () =>
       api.get<Paginated<TransactionDto>>('/api/transactions', {
-        ...period,
+        ...statsParams,
         limit: 6,
         sort: 'date_desc',
       }),
@@ -89,6 +112,8 @@ export default function DashboardPage() {
 
   const isCurrentMonth = month === currentMonthKey();
   const noData = summary.data?.transactionCount === 0;
+  // Một nguồn tiền thì không có gì để lọc — dropdown chỉ thêm nhiễu.
+  const canFilterByAccount = (accounts.data?.length ?? 0) > 1;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -100,6 +125,21 @@ export default function DashboardPage() {
         {/* Ô chọn kỳ nằm NGOÀI nhánh rỗng bên dưới: tháng không có giao dịch vẫn
             phải đổi được kỳ, nếu không người dùng kẹt ở một tháng trống. */}
         <div className="flex flex-wrap items-center gap-2">
+          {canFilterByAccount && (
+            <Select
+              aria-label="Lọc theo nguồn tiền"
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              className="w-48"
+            >
+              <option value="">Tất cả nguồn tiền</option>
+              {accounts.data?.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </Select>
+          )}
           <Select
             aria-label="Chọn kỳ"
             value={month}
@@ -139,15 +179,16 @@ export default function DashboardPage() {
       ) : (
         <>
           {/* ─── KPI row ─── */}
-          <section className="grid gap-4 sm:grid-cols-3">
+          <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {summary.isPending ? (
               <>
                 <Skeleton className="h-[7.5rem]" />
                 <Skeleton className="h-[7.5rem]" />
                 <Skeleton className="h-[7.5rem]" />
+                <Skeleton className="h-[7.5rem]" />
               </>
             ) : summary.isError ? (
-              <Card className="sm:col-span-3">
+              <Card className="sm:col-span-2 xl:col-span-4">
                 <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
               </Card>
             ) : (
@@ -160,12 +201,19 @@ export default function DashboardPage() {
                   upIsGood
                 />
                 <StatTile
-                  label="Tổng chi"
+                  label="Chi tiêu"
                   value={summary.data.expense}
                   previous={summary.data.previous.expense}
                   tone="expense"
                   upIsGood={false}
                 />
+                {/*
+                  Hai con số chi cạnh nhau là có chủ ý, không phải trùng lặp:
+                  "Chi tiêu" tính khoản quẹt thẻ ngay tại ngày mua, còn "Tiền đã
+                  ra" chỉ đếm lúc tiền thật sự rời tài khoản. Tháng tiêu nhiều
+                  bằng thẻ thì hai số lệch nhau, và đó chính là thông tin.
+                */}
+                <StatTile label="Tiền đã ra" value={summary.data.cashOutflow} />
                 <StatTile
                   label="Còn lại"
                   value={summary.data.net}
@@ -175,6 +223,26 @@ export default function DashboardPage() {
               </>
             )}
           </section>
+
+          {/*
+            Nói rõ đã loại gì khỏi các con số trên. Giấu tiền đi mà không nói là
+            cách nhanh nhất khiến người dùng mất tin — nhất là khi nhận diện có
+            thể sai và họ là người duy nhất biết điều đó.
+          */}
+          {summary.data && summary.data.internal.count > 0 && (
+            <Link
+              // Mang theo kỳ đang xem: không có nó thì link nhảy sang tháng hiện
+              // tại và người dùng thấy danh sách rỗng ngay sau khi vừa đọc "đã
+              // loại 4 khoản" — trông như link hỏng.
+              href={`/transactions?internal=only&from=${period.from}&to=${period.to}`}
+              className="flex items-center gap-2 text-sm text-ink-secondary hover:text-ink"
+            >
+              <Shuffle aria-hidden className="size-4 shrink-0 text-ink-muted" />
+              Đã loại {summary.data.internal.count} khoản chuyển tiền nội bộ (
+              {formatVnd(summary.data.internal.total)}) khỏi thống kê
+              <ArrowRight aria-hidden className="size-3.5 shrink-0" />
+            </Link>
+          )}
 
           <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
             {/* ─── Xu hướng 6 tháng ─── */}
@@ -260,14 +328,40 @@ export default function DashboardPage() {
                 ) : breakdown.isError ? (
                   <ErrorState error={breakdown.error} onRetry={() => void breakdown.refetch()} />
                 ) : (
-                  <CategoryBars
-                    items={breakdown.data.expense}
+                  <BreakdownBars
+                    items={breakdown.data.expense.map(categoryBar)}
                     emptyLabel={`Chưa có khoản chi nào trong ${formatMonth(month).toLowerCase()}`}
                   />
                 )}
               </div>
             </Card>
 
+            {/* ─── Chi theo nguồn tiền ─── */}
+            <Card>
+              <CardHeader
+                title="Chi theo nguồn tiền"
+                subtitle="Tổng khớp với Chi tiêu ở trên"
+              />
+              <div className="mt-3">
+                {byAccount.isPending ? (
+                  <div className="space-y-3 px-5 pb-5">
+                    {[0, 1, 2].map((i) => (
+                      <Skeleton key={i} className="h-12" />
+                    ))}
+                  </div>
+                ) : byAccount.isError ? (
+                  <ErrorState error={byAccount.error} onRetry={() => void byAccount.refetch()} />
+                ) : (
+                  <BreakdownBars
+                    items={byAccount.data.expense.map(accountBar)}
+                    emptyLabel="Import sao kê để thấy chi tiêu tách theo thẻ, tài khoản và ví"
+                  />
+                )}
+              </div>
+            </Card>
+          </div>
+
+          <div className="grid gap-6">
             {/* ─── Giao dịch gần đây ─── */}
             <Card>
               <CardHeader
@@ -311,15 +405,22 @@ export default function DashboardPage() {
                           <p className="text-sm text-ink-muted">
                             {formatDateShort(tx.date)}
                             {tx.category ? ` · ${tx.category.name}` : ' · Chưa phân loại'}
+                            {/* Không im lặng: dòng này hiện số tiền nhưng KHÔNG
+                                nằm trong các KPI phía trên. Thấy một khoản 862k
+                                mà tổng chi không đổi thì người dùng sẽ nghĩ app
+                                tính sai. */}
+                            {tx.internalKind && ' · ngoài thống kê'}
                           </p>
                         </div>
                         <span
                           className="shrink-0 text-sm font-medium tabular"
                           style={{
                             color:
-                              tx.type === 'income'
-                                ? 'var(--series-income)'
-                                : 'var(--ink)',
+                              tx.internalKind
+                                ? 'var(--ink-muted)'
+                                : tx.type === 'income'
+                                  ? 'var(--series-income)'
+                                  : 'var(--ink)',
                           }}
                         >
                           {tx.type === 'income' ? '+' : '−'}

@@ -1,6 +1,13 @@
 'use client';
 
-import { formatVnd, formatVndCompact, type BudgetAlertDto, type CategoryBreakdownItemDto, type TrendPointDto } from '@expense/shared';
+import {
+  formatVnd,
+  formatVndCompact,
+  type AccountBreakdownItemDto,
+  type BudgetAlertDto,
+  type CategoryBreakdownItemDto,
+  type TrendPointDto,
+} from '@expense/shared';
 import { TrendingDown, TrendingUp } from 'lucide-react';
 import {
   CartesianGrid,
@@ -244,13 +251,51 @@ function TooltipRow({
   );
 }
 
-// ─── Breakdown theo danh mục: bar ngang, một màu ─────────────────────────────
+// ─── Breakdown: bar ngang, một màu ───────────────────────────────────────────
 
-export function CategoryBars({
+/**
+ * Một dòng bar. Cố ý KHÔNG nhận thẳng DTO của danh mục hay của nguồn tiền: hai
+ * DTO đó khác nhau ở tên khoá định danh (`categoryId` / `accountId`), và cả hai
+ * vẫn đọc là "một nhãn, một số tiền, một tỷ lệ". Nhận dạng chung này giữ cho
+ * chỉ có MỘT cách vẽ breakdown trong app.
+ */
+export interface BreakdownBarItem {
+  /** null = mục gộp ("Chưa phân loại", "Không rõ nguồn"). */
+  id: string | null;
+  name: string;
+  icon: string;
+  color: string;
+  total: number;
+  share: number;
+}
+
+export function categoryBar(item: CategoryBreakdownItemDto): BreakdownBarItem {
+  return {
+    id: item.categoryId,
+    name: item.name,
+    icon: item.icon,
+    color: item.color,
+    total: item.total,
+    share: item.share,
+  };
+}
+
+export function accountBar(item: AccountBreakdownItemDto): BreakdownBarItem {
+  return {
+    id: item.accountId,
+    name: item.name,
+    icon: item.icon,
+    color: item.color,
+    total: item.total,
+    share: item.share,
+  };
+}
+
+export function BreakdownBars({
   items,
   emptyLabel,
 }: {
-  items: CategoryBreakdownItemDto[];
+  items: BreakdownBarItem[];
   emptyLabel: string;
 }) {
   if (items.length === 0) {
@@ -262,7 +307,7 @@ export function CategoryBars({
   return (
     <ul className="divide-y">
       {items.map((item) => (
-        <li key={item.categoryId ?? 'uncategorized'} className="px-5 py-3">
+        <li key={item.id ?? 'none'} className="px-5 py-3">
           <div className="flex items-center gap-3">
             <CategoryIcon icon={item.icon} color={item.color} />
 

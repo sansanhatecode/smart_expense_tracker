@@ -41,7 +41,7 @@ export function parseTable(
   );
 
   if (rowsWithContent.length === 0) {
-    return { rows: [], skipped: [], profileId: profile.id };
+    return { rows: [], skipped: [], profileId: profile.id, signatureMatched: false };
   }
 
   const headerIndex = findHeaderRow(rowsWithContent, profile);
@@ -59,6 +59,7 @@ export function parseTable(
         },
       ],
       profileId: profile.id,
+      signatureMatched: false,
     };
   }
 
@@ -78,6 +79,7 @@ export function parseTable(
         },
       ],
       profileId: profile.id,
+      signatureMatched: false,
     };
   }
 
@@ -104,7 +106,13 @@ export function parseTable(
     rows.push(outcome);
   }
 
-  return { rows, skipped, profileId: profile.id };
+  return { rows, skipped, profileId: profile.id, signatureMatched: matchesSignature(headers, profile) };
+}
+
+/** File có đủ mọi cột chữ ký của profile không. Không khai chữ ký = không nhận. */
+function matchesSignature(headers: string[], profile: BankProfile): boolean {
+  if (!profile.signatureColumns || profile.signatureColumns.length === 0) return false;
+  return profile.signatureColumns.every((column) => headers.includes(column));
 }
 
 function rowToRaw(cells: Cell[]): string {

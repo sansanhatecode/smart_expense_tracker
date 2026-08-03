@@ -3,6 +3,7 @@
 import {
   ArrowLeftRight,
   ChartPie,
+  Landmark,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -22,6 +23,7 @@ const NAV = [
   { href: '/dashboard', label: 'Tổng quan', Icon: LayoutDashboard },
   { href: '/transactions', label: 'Giao dịch', Icon: ArrowLeftRight },
   { href: '/imports', label: 'Import sao kê', Icon: Upload },
+  { href: '/accounts', label: 'Nguồn tiền', Icon: Landmark },
   { href: '/budgets', label: 'Ngân sách', Icon: Wallet },
   { href: '/categories', label: 'Danh mục', Icon: Tag },
 ];

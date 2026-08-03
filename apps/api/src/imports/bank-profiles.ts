@@ -232,6 +232,10 @@ const MOMO_PROFILE: BankProfile = {
   creditColumn: undefined,
   balanceColumn: ['sodusaugiaodich', 'sodusau', ...BALANCE_ALIASES],
   statusColumn: STATUS_ALIASES,
+  // Sao kê ngân hàng hiếm khi có ĐỒNG THỜI cột "Loại giao dịch" và "Trạng thái
+  // GD"; MoMo luôn có cả hai. Đòi đủ cả hai thay vì một, để một file ngân hàng
+  // lỡ có cột trạng thái không bị nhận nhầm thành ví.
+  signatureColumns: ['loaigiaodich', 'trangthaigd'],
   dateFormat: 'DD/MM/YYYY',
   skipRows: 0,
 };

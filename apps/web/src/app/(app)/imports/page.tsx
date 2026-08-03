@@ -1,6 +1,7 @@
 'use client';
 
 import type {
+  AccountKind,
   BankProfileDto,
   ConfirmImportResultDto,
   ImportBatchDto,
@@ -10,6 +11,7 @@ import type {
 import { formatVnd } from '@expense/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileSpreadsheet, TriangleAlert, Undo2, Upload } from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 import { ApiError, api } from '@/lib/api';
 import { useCategories } from '@/lib/queries';
@@ -27,6 +29,12 @@ import {
   Skeleton,
   StatusBadge,
 } from '@/components/ui';
+
+const ACCOUNT_KIND_LABEL: Record<AccountKind, string> = {
+  bank: 'Tài khoản ngân hàng',
+  credit_card: 'Thẻ tín dụng',
+  wallet: 'Ví điện tử',
+};
 
 export default function ImportsPage() {
   const [batchId, setBatchId] = useState<string | null>(null);
@@ -219,7 +227,7 @@ function PreviewPanel({ batchId, onClose }: { batchId: string; onClose: () => vo
     );
   }
 
-  const { counts, rows, skippedRows, fileName } = preview.data;
+  const { account, counts, rows, skippedRows, fileName } = preview.data;
 
   return (
     <div className="space-y-4">
@@ -231,6 +239,21 @@ function PreviewPanel({ batchId, onClose }: { batchId: string; onClose: () => vo
             <p className="mt-0.5 text-sm text-ink-muted">
               Chưa có gì được ghi vào dữ liệu
             </p>
+            {/*
+              Nguồn tiền được nhận ra từ nội dung file, không hỏi người dùng —
+              nên phải nói ra ở đây. Nhận nhầm sao kê thẻ thành tài khoản ngân
+              hàng làm dư nợ và dòng tiền sai, và họ là người duy nhất thấy được.
+            */}
+            {account && (
+              <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
+                <Badge>
+                  {ACCOUNT_KIND_LABEL[account.kind]} · {account.name}
+                </Badge>
+                <Link href="/accounts" className="font-medium text-accent">
+                  Đổi tên nguồn tiền
+                </Link>
+              </p>
+            )}
           </div>
           <div className="flex gap-2">
             <Button onClick={() => discard.mutate()} loading={discard.isPending}>

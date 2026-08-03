@@ -18,6 +18,7 @@ import type {
   UpdateStagedRowInput,
 } from '@expense/shared';
 import { detectAccount } from './account-detect';
+import { beatsBest } from './detect-profile';
 import { AUTO_DETECT_CANDIDATES, findProfile } from './bank-profiles';
 import { categorize, type CategorizerRule, type MccRuleMap } from './categorizer';
 import { assignSequences, computeDedupeHash } from './dedupe';
@@ -26,7 +27,13 @@ import { buildMccRules } from './mcc';
 import { normalize } from './normalizer';
 import { CsvParser } from './parsers/csv.parser';
 import { XlsxParser } from './parsers/xlsx.parser';
-import type { BankProfile, NormalizedTransaction, SkippedRow, StatementParser, UploadedFile } from './types';
+import type {
+  BankProfile,
+  NormalizedTransaction,
+  SkippedRow,
+  StatementParser,
+  UploadedFile,
+} from './types';
 import { toCategorySummary, toDateOnly, toMoney, toNullableMoney } from '../common/mappers';
 import { env } from '../config/env';
 import { Prisma } from '../generated/prisma/client';
@@ -439,6 +446,11 @@ export class ImportsService {
    * không suy ra được từ một dòng. Nhưng nếu cả file dùng DD/MM thì profile
    * MM/DD sẽ vấp ở mọi dòng có ngày > 12, nên đếm số dòng đọc được là tín hiệu
    * đủ tốt để phân biệt.
+   *
+   * Hoà số dòng thì profile khớp CHỮ KÝ CỘT thắng. Chỉ đếm dòng là chưa đủ:
+   * generic đọc trọn một file MoMo y hệt profile MoMo và luôn được thử trước,
+   * nên MoMo không bao giờ thắng — file ví bị xếp thành tài khoản ngân hàng,
+   * gộp chung với ngân hàng thật, và khoản nạp ví thành thu nhập.
    */
   private async parseWithProfile(
     parser: StatementParser,
@@ -458,11 +470,14 @@ export class ImportsService {
 
     for (const profile of AUTO_DETECT_CANDIDATES) {
       const result = await this.runParser(parser, file, profile);
-      if (!best || result.rows.length > best.result.rows.length) {
+      if (!best || beatsBest(result, best.result)) {
         best = { result, profile };
       }
-      // Đọc được hết, không lỗi dòng nào → không cần thử tiếp.
-      if (result.rows.length > 0 && result.skipped.length === 0) break;
+      // Đọc được hết, không lỗi dòng nào, và không profile nào sau đó có thể
+      // khớp chữ ký tốt hơn → dừng sớm.
+      if (result.rows.length > 0 && result.skipped.length === 0 && result.signatureMatched) {
+        break;
+      }
     }
 
     if (!best) {
@@ -623,6 +638,7 @@ export class ImportsService {
         bankProfile: true,
         status: true,
         createdAt: true,
+        account: { select: { id: true, name: true, kind: true } },
         staged: { select: STAGED_SELECT, orderBy: { rowIndex: 'asc' } },
       },
     });
@@ -638,6 +654,7 @@ export class ImportsService {
       fileName: batch.fileName,
       source: batch.source,
       bankProfile: batch.bankProfile,
+      account: batch.account,
       status: batch.status,
       createdAt: batch.createdAt.toISOString(),
       counts: buildCounts(rows, skipped.length),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { detectAccount } from './account-detect';
-import { findProfile, GENERIC_PROFILE } from './bank-profiles';
+import { AUTO_DETECT_CANDIDATES, findProfile, GENERIC_PROFILE } from './bank-profiles';
+import { beatsBest } from './detect-profile';
 import { normalize } from './normalizer';
 import { CsvParser } from './parsers/csv.parser';
 import type { BankProfile, UploadedFile } from './types';
@@ -14,6 +15,24 @@ function csv(content: string): UploadedFile {
 
 async function parse(content: string, profile: BankProfile = GENERIC_PROFILE) {
   return parser.parse(csv(content), profile);
+}
+
+/**
+ * Dò profile như imports.service làm khi người dùng không chọn ngân hàng.
+ *
+ * Lặp lại vòng lặp thay vì gọi service, nhưng dùng CHUNG hàm `beatsBest` — luật
+ * chọn profile là thứ đang được kiểm, và nó phải chỉ có một bản.
+ */
+async function parseAuto(content: string) {
+  let best: { result: Awaited<ReturnType<typeof parse>>; profile: BankProfile } | null = null;
+
+  for (const profile of AUTO_DETECT_CANDIDATES) {
+    const result = await parse(content, profile);
+    if (!best || beatsBest(result, best.result)) best = { result, profile };
+  }
+
+  if (!best) throw new Error('không dò được profile');
+  return best;
 }
 
 /** parse → detect → normalize, đúng thứ tự mà imports.service chạy. */
@@ -65,6 +84,43 @@ describe('detectAccount', () => {
 
     expect(detected.kind).toBe('bank');
     expect(detected.name).toBe('Tài khoản ngân hàng');
+  });
+
+  it('file MoMo tự dò ra profile MoMo, không rơi vào generic', async () => {
+    // Hồi quy: generic đọc trọn file MoMo y hệt profile MoMo và được thử trước,
+    // nên nó thắng thế hoà. Hậu quả không dừng ở cái tên — file ví bị xếp thành
+    // tài khoản ngân hàng, gộp fingerprint với ngân hàng thật, và khoản nạp ví
+    // (tiền VÀO ví) thành thu nhập vì luật nội bộ đòi kind phải là 'wallet'.
+    const content = [
+      'Thời gian,Loại Giao Dịch,Số Tiền,Trạng Thái GD,Số Dư Sau Giao Dịch',
+      '18/07/2026 09:12:00,Nạp tiền từ ngân hàng liên kết,1.000.000,Thành công,1.000.000',
+      '20/07/2026 12:30:00,Thanh toán Highlands Coffee,-95.000,Thành công,905.000',
+    ].join('\n');
+
+    const parsed = await parseAuto(content);
+    expect(parsed.profile.id).toBe('momo');
+
+    const detected = detectAccount(parsed.profile, parsed.result.rows);
+    expect(detected).toMatchObject({ kind: 'wallet', fingerprint: 'MoMo:wallet' });
+
+    const { rows } = normalize(parsed.result.rows, parsed.profile, detected.kind);
+    expect(rows[0]).toMatchObject({ type: 'income', internalKind: 'wallet_topup' });
+    // Chi tiêu qua ví vẫn là chi tiêu thật
+    expect(rows[1]).toMatchObject({ type: 'expense', internalKind: null });
+  });
+
+  it('sao kê ngân hàng KHÔNG bị chữ ký MoMo kéo sang ví', async () => {
+    // Chữ ký chỉ phá thế hoà. File ngân hàng không có đủ cả hai cột chữ ký nên
+    // generic vẫn thắng, kể cả khi nó có cột trạng thái.
+    const parsed = await parseAuto(
+      [
+        'Ngày giao dịch,Nội dung,Số tiền,Trạng thái',
+        '15/07/2026,GRAB,-120.000,Thành công',
+      ].join('\n'),
+    );
+
+    expect(parsed.profile.id).toBe('generic');
+    expect(detectAccount(parsed.profile, parsed.result.rows).kind).toBe('bank');
   });
 
   it('profile MoMo → ví điện tử', async () => {

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   importSourceSchema,
   importStatusSchema,
+  type AccountKind,
   type ImportSource,
   type ImportStatus,
   type TxType,
@@ -73,6 +74,13 @@ export interface ImportPreviewDto {
   fileName: string;
   source: ImportSource;
   bankProfile: string | null;
+  /**
+   * Nguồn tiền suy ra từ nội dung file. Hiện ở preview để người dùng thấy hệ
+   * thống hiểu file này là gì TRƯỚC khi confirm — nhận nhầm sao kê thẻ thành
+   * tài khoản ngân hàng sẽ làm dư nợ và dòng tiền sai, và họ là người duy nhất
+   * phát hiện được.
+   */
+  account: { id: string; name: string; kind: AccountKind } | null;
   status: ImportStatus;
   createdAt: string;
   counts: ImportCountsDto;

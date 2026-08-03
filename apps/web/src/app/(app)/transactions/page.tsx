@@ -1,15 +1,18 @@
 'use client';
 
 import type {
+  AccountDto,
   CreateTransactionInput,
+  InternalKind,
   Paginated,
   TransactionDto,
   TxType,
 } from '@expense/shared';
 import { formatVnd, parseVndInput } from '@expense/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Trash2, X } from 'lucide-react';
-import { useState } from 'react';
+import { Plus, Search, Shuffle, Trash2, X } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
 import { useCategories } from '@/lib/queries';
 import { currentMonthRange, formatDate } from '@/lib/utils';
@@ -34,18 +37,46 @@ interface Filters {
   type: '' | TxType;
   categoryId: string;
   uncategorized: boolean;
+  accountId: string;
+  internal: '' | 'only' | 'exclude';
   q: string;
   page: number;
 }
 
+/** Nhãn của từng lý do "đây là tiền đổi chỗ, không phải chi tiêu". */
+const INTERNAL_LABEL: Record<InternalKind, string> = {
+  card_payment: 'Trả nợ thẻ',
+  wallet_topup: 'Nạp ví',
+  self_transfer: 'Chuyển nội bộ',
+};
+
+/**
+ * useSearchParams cần Suspense trong app router, nếu không `next build` sẽ báo
+ * lỗi prerender. Nó có ở đây vì dashboard link sang `?internal=only`.
+ */
 export default function TransactionsPage() {
+  return (
+    <Suspense fallback={<Skeleton className="mx-auto h-96 max-w-6xl" />}>
+      <TransactionsView />
+    </Suspense>
+  );
+}
+
+function TransactionsView() {
   const month = currentMonthRange();
+  const searchParams = useSearchParams();
+  const initialInternal = searchParams.get('internal');
+
   const [filters, setFilters] = useState<Filters>({
-    from: month.from,
-    to: month.to,
+    // Kỳ đến từ URL nếu có: dashboard link sang đây với đúng tháng đang xem, và
+    // rơi về tháng hiện tại sẽ cho danh sách rỗng ngay sau khi vừa nói có N khoản.
+    from: searchParams.get('from') ?? month.from,
+    to: searchParams.get('to') ?? month.to,
     type: '',
     categoryId: '',
     uncategorized: false,
+    accountId: '',
+    internal: initialInternal === 'only' || initialInternal === 'exclude' ? initialInternal : '',
     q: '',
     page: 1,
   });
@@ -53,6 +84,11 @@ export default function TransactionsPage() {
 
   const categories = useCategories();
   const queryClient = useQueryClient();
+
+  const accounts = useQuery({
+    queryKey: ['accounts'],
+    queryFn: () => api.get<AccountDto[]>('/api/accounts'),
+  });
 
   const transactions = useQuery({
     queryKey: ['transactions', filters],
@@ -63,6 +99,8 @@ export default function TransactionsPage() {
         type: filters.type || undefined,
         categoryId: filters.uncategorized ? undefined : filters.categoryId || undefined,
         uncategorized: filters.uncategorized ? 'true' : undefined,
+        accountId: filters.accountId || undefined,
+        internal: filters.internal || undefined,
         q: filters.q || undefined,
         page: filters.page,
         limit: PAGE_SIZE,
@@ -83,6 +121,17 @@ export default function TransactionsPage() {
 
   const remove = useMutation({
     mutationFn: (id: string) => api.delete<void>(`/api/transactions/${id}`),
+    onSuccess: invalidate,
+  });
+
+  /**
+   * Van an toàn cho nhận diện tự động. Ví dụ người dùng trả hộ thẻ của người
+   * khác: mô tả giống hệt một khoản trả nợ thẻ, nhưng đó là chi tiêu thật và
+   * chỉ họ mới biết. Bỏ đánh dấu đưa nó trở lại thống kê ngay.
+   */
+  const setInternal = useMutation({
+    mutationFn: ({ id, internalKind }: { id: string; internalKind: InternalKind | null }) =>
+      api.patch<TransactionDto>(`/api/transactions/${id}`, { internalKind }),
     onSuccess: invalidate,
   });
 
@@ -118,7 +167,7 @@ export default function TransactionsPage() {
 
       {/* ─── Filter: một hàng phía trên bảng ─── */}
       <Card className="p-4">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
           <Field label="Từ ngày">
             <Input
               type="date"
@@ -164,6 +213,29 @@ export default function TransactionsPage() {
               ))}
             </Select>
           </Field>
+          <Field label="Nguồn tiền">
+            <Select
+              value={filters.accountId}
+              onChange={(e) => update({ accountId: e.target.value })}
+            >
+              <option value="">Tất cả</option>
+              {(accounts.data ?? []).map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Khoản nội bộ">
+            <Select
+              value={filters.internal}
+              onChange={(e) => update({ internal: e.target.value as Filters['internal'] })}
+            >
+              <option value="">Hiện tất cả</option>
+              <option value="only">Chỉ khoản nội bộ</option>
+              <option value="exclude">Ẩn khoản nội bộ</option>
+            </Select>
+          </Field>
           <Field label="Tìm trong mô tả">
             <div className="relative">
               <Search
@@ -179,6 +251,15 @@ export default function TransactionsPage() {
             </div>
           </Field>
         </div>
+
+        {filters.internal === 'only' && (
+          <p className="mt-3 text-sm text-ink-secondary">
+            Đây là các khoản đã bị loại khỏi thống kê thu chi vì được coi là tiền
+            đổi chỗ giữa các nguồn của bạn. Nếu có khoản nào thật sự là chi tiêu,
+            bấm <span className="font-medium text-ink">Tính lại</span> để đưa nó
+            trở lại.
+          </p>
+        )}
       </Card>
 
       {/* ─── Danh sách ─── */}
@@ -215,13 +296,32 @@ export default function TransactionsPage() {
 
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-ink">{tx.description}</p>
-                    <p className="mt-0.5 flex items-center gap-2 text-sm text-ink-muted">
+                    <p className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
                       <span className="tabular">{formatDate(tx.date)}</span>
+                      {tx.account && <span className="truncate">{tx.account.name}</span>}
                       {tx.importBatchId && (
                         <Badge className="text-[0.75rem]">từ import</Badge>
                       )}
+                      {/* Nói rõ dòng này KHÔNG nằm trong tổng thu chi, ngay tại
+                          chỗ người dùng nhìn thấy số tiền của nó. */}
+                      {tx.internalKind && (
+                        <Badge className="text-[0.75rem]">
+                          <Shuffle aria-hidden className="size-3" />
+                          {INTERNAL_LABEL[tx.internalKind]} · ngoài thống kê
+                        </Badge>
+                      )}
                     </p>
                   </div>
+
+                  {tx.internalKind && (
+                    <Button
+                      size="sm"
+                      disabled={setInternal.isPending}
+                      onClick={() => setInternal.mutate({ id: tx.id, internalKind: null })}
+                    >
+                      Tính lại
+                    </Button>
+                  )}
 
                   {/* Đổi danh mục ngay tại dòng: sau import luôn còn một loạt
                       giao dịch chưa phân loại, mở dialog cho từng cái là lý do

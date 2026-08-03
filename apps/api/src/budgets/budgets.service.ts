@@ -7,45 +7,26 @@ import {
   type UpsertBudgetInput,
 } from '@expense/shared';
 import { toMoney } from '../common/mappers';
-import { Prisma } from '../generated/prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-
-const BUDGET_SELECT = {
-  id: true,
-  month: true,
-  limitAmount: true,
-  category: {
-    select: { id: true, name: true, type: true, icon: true, color: true, sortOrder: true },
-  },
-} as const;
-
-type BudgetRow = Prisma.BudgetGetPayload<{ select: typeof BUDGET_SELECT }>;
+import { BudgetsRepository, type BudgetRow } from './budgets.repository';
 
 @Injectable()
 export class BudgetsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly budgets: BudgetsRepository) {}
 
-  /**
-   * Ngân sách của một kỳ, kèm số đã chi tính từ DB.
-   *
-   * `spent` được tổng hợp bằng một câu GROUP BY cho cả kỳ, không phải một query
-   * cho mỗi budget: với 11 danh mục chi thì cách kia là 11 round-trip cho một
-   * trang duy nhất.
-   */
+  /** Ngân sách của một kỳ, kèm số đã chi tính từ DB. */
   async list(userId: string, month?: string): Promise<BudgetDto[]> {
     const period = month ?? currentMonthIct();
     const { from, to } = monthBounds(period);
 
     const [budgets, spentByCategory] = await Promise.all([
-      this.prisma.budget.findMany({
-        where: { userId, month: period },
-        select: BUDGET_SELECT,
-        orderBy: { category: { sortOrder: 'asc' } },
-      }),
-      this.spentByCategory(userId, from, to),
+      this.budgets.findByMonth(userId, period),
+      this.budgets.spentByCategory(userId, from, to),
     ]);
 
-    return budgets.map((budget) => toBudgetDto(budget, spentByCategory.get(budget.category.id) ?? 0));
+    return budgets.map((budget) => {
+      const spent = spentByCategory.get(budget.category.id);
+      return toBudgetDto(budget, spent === undefined ? 0 : toMoney(spent));
+    });
   }
 
   /**
@@ -56,10 +37,7 @@ export class BudgetsService {
    * biết là đã từng đặt hay chưa.
    */
   async upsert(userId: string, input: UpsertBudgetInput): Promise<BudgetDto> {
-    const category = await this.prisma.category.findFirst({
-      where: { id: input.categoryId, userId },
-      select: { id: true, type: true, name: true },
-    });
+    const category = await this.budgets.findOwnedCategory(userId, input.categoryId);
 
     if (!category) {
       throw new NotFoundException('Không tìm thấy danh mục');
@@ -73,41 +51,26 @@ export class BudgetsService {
       );
     }
 
-    const budget = await this.prisma.budget.upsert({
-      where: {
-        userId_categoryId_month: {
-          userId,
-          categoryId: input.categoryId,
-          month: input.month,
-        },
-      },
-      create: {
-        userId,
-        categoryId: input.categoryId,
-        month: input.month,
-        limitAmount: numberToBigint(input.limitAmount),
-      },
-      update: { limitAmount: numberToBigint(input.limitAmount) },
-      select: BUDGET_SELECT,
+    const budget = await this.budgets.upsert(userId, {
+      categoryId: input.categoryId,
+      month: input.month,
+      limitAmount: numberToBigint(input.limitAmount),
     });
 
     const { from, to } = monthBounds(input.month);
-    const spent = await this.spentForCategory(userId, input.categoryId, from, to);
+    const spent = await this.budgets.spentForCategory(userId, input.categoryId, from, to);
 
-    return toBudgetDto(budget, spent);
+    return toBudgetDto(budget, toMoney(spent));
   }
 
   async remove(userId: string, id: string): Promise<void> {
-    const existing = await this.prisma.budget.findFirst({
-      where: { id, userId },
-      select: { id: true },
-    });
+    const existing = await this.budgets.findOwned(userId, id);
 
     if (!existing) {
       throw new NotFoundException('Không tìm thấy ngân sách');
     }
 
-    await this.prisma.budget.delete({ where: { id } });
+    await this.budgets.delete(id);
   }
 
   /**
@@ -135,55 +98,6 @@ export class BudgetsService {
       }))
       // Vượt nhiều nhất lên trước: đó là thứ người dùng cần thấy đầu tiên.
       .sort((a, b) => b.spent / b.limitAmount - a.spent / a.limitAmount);
-  }
-
-  private async spentByCategory(
-    userId: string,
-    from: string,
-    to: string,
-  ): Promise<Map<string, number>> {
-    const rows = await this.prisma.transaction.groupBy({
-      by: ['categoryId'],
-      where: {
-        userId,
-        type: 'expense',
-        date: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) },
-        categoryId: { not: null },
-        // Cùng định nghĩa "chi tiêu thật" với stats. Thiếu điều kiện này thì một
-        // khoản trả nợ thẻ rơi vào danh mục 'Chuyển tiền' sẽ ăn hết ngân sách
-        // của danh mục đó, dù người dùng chưa tiêu thêm đồng nào.
-        internalKind: null,
-      },
-      _sum: { amount: true },
-    });
-
-    const spent = new Map<string, number>();
-    for (const row of rows) {
-      if (row.categoryId && row._sum.amount !== null) {
-        spent.set(row.categoryId, toMoney(row._sum.amount));
-      }
-    }
-    return spent;
-  }
-
-  private async spentForCategory(
-    userId: string,
-    categoryId: string,
-    from: string,
-    to: string,
-  ): Promise<number> {
-    const result = await this.prisma.transaction.aggregate({
-      where: {
-        userId,
-        categoryId,
-        type: 'expense',
-        date: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) },
-        internalKind: null,
-      },
-      _sum: { amount: true },
-    });
-
-    return result._sum.amount === null ? 0 : toMoney(result._sum.amount);
   }
 }
 

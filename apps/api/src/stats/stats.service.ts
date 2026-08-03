@@ -10,34 +10,28 @@ import type {
   TrendPointDto,
   TrendQuery,
 } from '@expense/shared';
-import { Prisma } from '../generated/prisma/client';
 import type { AccountKind, TxType } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
+import { StatsRepository, type CategoryTotalRow } from './stats.repository';
 
 /**
  * Thống kê.
  *
- * Mọi phép tổng hợp chạy ở DB, không kéo row về app rồi cộng bằng JS. Với vài
- * nghìn giao dịch thì cả hai cách đều nhanh, nhưng cách kéo về sẽ chậm dần theo
- * số giao dịch của người dùng — tức chậm đúng lúc app trở nên hữu ích.
- *
- * `date` là cột DATE nên mọi so sánh và nhóm theo tháng làm trực tiếp trên ngày
- * lịch, không cần `AT TIME ZONE` ở đâu cả. Xem ADR 9.5.
- *
  * ─── Chi tiêu THẬT và dòng tiền là hai con số khác nhau ───
  *
- * Mọi query thu/chi ở đây đều lọc `internalKind IS NULL`. Tiền chuyển giữa các
- * nguồn của chính người dùng — trả nợ thẻ, nạp ví — không phải chi tiêu, và
- * cộng nó vào là đếm hai lần đúng số tiền đã được ghi nhận ở nơi khác.
+ * Mọi query thu/chi đều lọc `internalKind IS NULL`. Tiền chuyển giữa các nguồn
+ * của chính người dùng — trả nợ thẻ, nạp ví — không phải chi tiêu, và cộng nó
+ * vào là đếm hai lần đúng số tiền đã được ghi nhận ở nơi khác.
  *
  * `cashOutflow` là câu hỏi khác: tiền thật sự rời khỏi các nguồn có sẵn. Nó
  * KHÔNG tính khoản mua bằng thẻ (tiền chưa đi đâu cả) nhưng CÓ tính khoản thanh
  * toán sao kê. Hai con số này lệch nhau là bình thường và có ý nghĩa; ép chúng
  * về một là thứ đã làm thống kê sai ngay từ đầu.
+ *
+ * Chi tiết từng câu query nằm ở ./stats.repository.ts.
  */
 @Injectable()
 export class StatsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly stats: StatsRepository) {}
 
   /**
    * Tổng quan một kỳ, kèm số của kỳ liền trước CÙNG ĐỘ DÀI.
@@ -53,10 +47,10 @@ export class StatsService {
     const account = query.accountId;
 
     const [current, prior, cashOutflow, internal] = await Promise.all([
-      this.sumByType(userId, from, to, account),
-      this.sumByType(userId, previous.from, previous.to, account),
-      this.sumCashOutflow(userId, from, to, account),
-      this.sumInternal(userId, from, to, account),
+      this.stats.sumByType(userId, from, to, account),
+      this.stats.sumByType(userId, previous.from, previous.to, account),
+      this.stats.sumCashOutflow(userId, from, to, account),
+      this.stats.sumInternal(userId, from, to, account),
     ]);
 
     return {
@@ -88,31 +82,7 @@ export class StatsService {
   async byAccount(userId: string, query: StatsQuery): Promise<AccountBreakdownDto> {
     const { from, to } = resolvePeriod(query);
 
-    const rows = await this.prisma.$queryRaw<
-      Array<{
-        accountId: string | null;
-        name: string | null;
-        kind: AccountKind | null;
-        total: bigint;
-        count: bigint;
-      }>
-    >(Prisma.sql`
-      SELECT t."accountId"                 AS "accountId",
-             a."name"                      AS "name",
-             a."kind"                      AS "kind",
-             SUM(t."amount")               AS "total",
-             COUNT(*)                      AS "count"
-        FROM "Transaction" t
-        LEFT JOIN "Account" a ON a."id" = t."accountId"
-       WHERE t."userId" = ${userId}
-         AND t."date" >= ${from}::date
-         AND t."date" <= ${to}::date
-         AND t."type" = 'expense'
-         AND t."internalKind" IS NULL
-         ${accountFilter(query.accountId)}
-       GROUP BY t."accountId", a."name", a."kind"
-       ORDER BY SUM(t."amount") DESC
-    `);
+    const rows = await this.stats.expenseByAccount(userId, from, to, query.accountId);
 
     const grandTotal = rows.reduce((sum, row) => sum + Number(row.total), 0);
 
@@ -145,34 +115,7 @@ export class StatsService {
   async byCategory(userId: string, query: StatsQuery): Promise<CategoryBreakdownDto> {
     const { from, to } = resolvePeriod(query);
 
-    const rows = await this.prisma.$queryRaw<
-      Array<{
-        categoryId: string | null;
-        name: string | null;
-        color: string | null;
-        icon: string | null;
-        type: TxType;
-        total: bigint;
-        count: bigint;
-      }>
-    >(Prisma.sql`
-      SELECT t."categoryId"                AS "categoryId",
-             c."name"                      AS "name",
-             c."color"                     AS "color",
-             c."icon"                      AS "icon",
-             t."type"                      AS "type",
-             SUM(t."amount")               AS "total",
-             COUNT(*)                      AS "count"
-        FROM "Transaction" t
-        LEFT JOIN "Category" c ON c."id" = t."categoryId"
-       WHERE t."userId" = ${userId}
-         AND t."date" >= ${from}::date
-         AND t."date" <= ${to}::date
-         AND t."internalKind" IS NULL
-         ${accountFilter(query.accountId)}
-       GROUP BY t."categoryId", c."name", c."color", c."icon", t."type"
-       ORDER BY SUM(t."amount") DESC
-    `);
+    const rows = await this.stats.totalsByCategory(userId, from, to, query.accountId);
 
     const expense = rows.filter((row) => row.type === 'expense');
     const income = rows.filter((row) => row.type === 'income');
@@ -185,37 +128,18 @@ export class StatsService {
     };
   }
 
-  /**
-   * Chuỗi thời gian theo ngày hoặc tháng.
-   *
-   * Đây là chỗ buộc phải dùng `$queryRaw`: Prisma `groupBy` không nhận expression
-   * nên không gọi được `date_trunc`. Dùng `Prisma.sql` với tham số thay vì nội
-   * suy chuỗi — `granularity` đến từ enum đã validate, nhưng nó vẫn được map qua
-   * một hằng trong code thay vì ghép thẳng vào SQL.
-   */
+  /** Chuỗi thời gian theo ngày hoặc tháng. */
   async trend(userId: string, query: TrendQuery): Promise<TrendDto> {
     const { from, to } = resolvePeriod(query);
     const granularity = query.granularity;
 
-    // Không nội suy `granularity` vào SQL: map qua hằng, nên dù enum có bị thêm
-    // giá trị lạ thì cũng không có đường nào chạm tới câu lệnh.
-    const truncUnit = granularity === 'day' ? Prisma.sql`'day'` : Prisma.sql`'month'`;
-
-    const rows = await this.prisma.$queryRaw<
-      Array<{ period: Date; type: TxType; total: bigint }>
-    >(Prisma.sql`
-      SELECT date_trunc(${truncUnit}, t."date")::date AS "period",
-             t."type"                                 AS "type",
-             SUM(t."amount")                          AS "total"
-        FROM "Transaction" t
-       WHERE t."userId" = ${userId}
-         AND t."date" >= ${from}::date
-         AND t."date" <= ${to}::date
-         AND t."internalKind" IS NULL
-         ${accountFilter(query.accountId)}
-       GROUP BY 1, 2
-       ORDER BY 1 ASC
-    `);
+    const rows = await this.stats.totalsByPeriod(
+      userId,
+      from,
+      to,
+      granularity,
+      query.accountId,
+    );
 
     // Điền các kỳ không có giao dịch bằng 0. Nếu để trống, chart đường sẽ nối
     // thẳng qua khoảng trống và trông như tháng đó vẫn có chi tiêu.
@@ -237,112 +161,6 @@ export class StatsService {
 
     return { from, to, granularity, points: [...buckets.values()] };
   }
-
-  private async sumByType(
-    userId: string,
-    from: string,
-    to: string,
-    accountId?: string,
-  ): Promise<{ income: number; expense: number; count: number }> {
-    const rows = await this.prisma.$queryRaw<
-      Array<{ type: TxType; total: bigint; count: bigint }>
-    >(Prisma.sql`
-      SELECT t."type"        AS "type",
-             SUM(t."amount") AS "total",
-             COUNT(*)        AS "count"
-        FROM "Transaction" t
-       WHERE t."userId" = ${userId}
-         AND t."date" >= ${from}::date
-         AND t."date" <= ${to}::date
-         AND t."internalKind" IS NULL
-         ${accountFilter(accountId)}
-       GROUP BY t."type"
-    `);
-
-    let income = 0;
-    let expense = 0;
-    let count = 0;
-
-    for (const row of rows) {
-      const total = Number(row.total);
-      if (row.type === 'income') income = total;
-      else expense = total;
-      count += Number(row.count);
-    }
-
-    return { income, expense, count };
-  }
-
-  /**
-   * Tiền thật sự rời khỏi các nguồn có sẵn trong kỳ.
-   *
-   * Ba điều kiện, mỗi điều kiện loại đúng một dạng đếm sai:
-   *
-   *   `a."kind" <> 'credit_card'` — khoản mua bằng thẻ chưa làm tiền rời đi
-   *   đâu cả. Nó đã nằm trong `expense` (dồn tích), cộng vào đây nữa là đếm hai
-   *   lần với chính khoản thanh toán sao kê ở dưới.
-   *
-   *   `internalKind IN (NULL, 'card_payment')` — giữ lại khoản trả nợ thẻ vì đó
-   *   là lúc tiền đi thật, nhưng bỏ nạp ví và chuyển giữa tài khoản của chính
-   *   mình: tiền vẫn trong túi người dùng, chỉ đổi chỗ.
-   *
-   *   `a."kind" IS NULL OR …` — giao dịch nhập tay không gắn nguồn được coi như
-   *   tiền mặt. LEFT JOIN mà quên nhánh NULL này thì INNER JOIN ngầm sẽ nuốt
-   *   mất chúng.
-   */
-  private async sumCashOutflow(
-    userId: string,
-    from: string,
-    to: string,
-    accountId?: string,
-  ): Promise<number> {
-    const rows = await this.prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`
-      SELECT COALESCE(SUM(t."amount"), 0) AS "total"
-        FROM "Transaction" t
-        LEFT JOIN "Account" a ON a."id" = t."accountId"
-       WHERE t."userId" = ${userId}
-         AND t."date" >= ${from}::date
-         AND t."date" <= ${to}::date
-         AND t."type" = 'expense'
-         AND (a."kind" IS NULL OR a."kind" <> 'credit_card')
-         AND (t."internalKind" IS NULL OR t."internalKind" = 'card_payment')
-         ${accountFilter(accountId)}
-    `);
-
-    return Number(rows[0]?.total ?? 0);
-  }
-
-  /**
-   * Các khoản đã bị loại khỏi thu/chi vì là dịch chuyển nội bộ.
-   *
-   * Trả ra để dashboard nói được "đã loại N khoản" kèm đường dẫn xem chúng.
-   * Loại tiền khỏi thống kê mà không nói gì là cách nhanh nhất khiến người dùng
-   * mất tin vào con số — nhất là khi nhận diện có thể sai.
-   */
-  private async sumInternal(
-    userId: string,
-    from: string,
-    to: string,
-    accountId?: string,
-  ): Promise<{ total: number; count: number }> {
-    const rows = await this.prisma.$queryRaw<Array<{ total: bigint; count: bigint }>>(Prisma.sql`
-      SELECT COALESCE(SUM(t."amount"), 0) AS "total",
-             COUNT(*)                     AS "count"
-        FROM "Transaction" t
-       WHERE t."userId" = ${userId}
-         AND t."date" >= ${from}::date
-         AND t."date" <= ${to}::date
-         AND t."internalKind" IS NOT NULL
-         ${accountFilter(accountId)}
-    `);
-
-    return { total: Number(rows[0]?.total ?? 0), count: Number(rows[0]?.count ?? 0) };
-  }
-}
-
-/** Mảnh WHERE lọc theo nguồn tiền. `Prisma.empty` khi không lọc — không nội suy chuỗi. */
-function accountFilter(accountId: string | undefined): Prisma.Sql {
-  return accountId === undefined ? Prisma.empty : Prisma.sql`AND t."accountId" = ${accountId}`;
 }
 
 /**
@@ -362,14 +180,7 @@ const ACCOUNT_STYLES: Record<AccountKind, { color: string; icon: string }> = {
 const UNKNOWN_ACCOUNT_STYLE = { color: '#94a3b8', icon: 'CircleHelp' };
 
 function toBreakdownItems(
-  rows: Array<{
-    categoryId: string | null;
-    name: string | null;
-    color: string | null;
-    icon: string | null;
-    total: bigint;
-    count: bigint;
-  }>,
+  rows: CategoryTotalRow[],
   type: TxType,
 ): CategoryBreakdownItemDto[] {
   const grandTotal = rows.reduce((sum, row) => sum + Number(row.total), 0);

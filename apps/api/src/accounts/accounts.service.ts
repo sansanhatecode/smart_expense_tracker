@@ -1,47 +1,22 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { numberToBigint, type AccountDto, type UpdateAccountInput } from '@expense/shared';
 import { toMoney } from '../common/mappers';
-import { Prisma } from '../generated/prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-
-const ACCOUNT_SELECT = {
-  id: true,
-  name: true,
-  kind: true,
-  openingBalance: true,
-  statementDay: true,
-  dueDay: true,
-  createdAt: true,
-} as const;
-
-type AccountRow = Prisma.AccountGetPayload<{ select: typeof ACCOUNT_SELECT }>;
-
-/** Tổng chi và tổng thu của một nguồn tiền, tính trên TOÀN BỘ lịch sử. */
-interface AccountTotals {
-  expense: bigint;
-  income: bigint;
-  count: number;
-}
+import {
+  AccountsRepository,
+  type AccountPatch,
+  type AccountRow,
+  type AccountTotals,
+} from './accounts.repository';
 
 @Injectable()
 export class AccountsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly accounts: AccountsRepository) {}
 
-  /**
-   * Danh sách nguồn tiền, kèm dư nợ với thẻ tín dụng.
-   *
-   * Tổng hợp bằng MỘT câu GROUP BY cho mọi account thay vì một query cho mỗi
-   * thẻ: số nguồn tiền thì ít, nhưng đây là trang được mở thường xuyên và một
-   * round-trip cho mỗi dòng là thứ không cần thiết ngay từ đầu.
-   */
+  /** Danh sách nguồn tiền, kèm dư nợ với thẻ tín dụng. */
   async list(userId: string): Promise<AccountDto[]> {
     const [accounts, totals] = await Promise.all([
-      this.prisma.account.findMany({
-        where: { userId },
-        select: ACCOUNT_SELECT,
-        orderBy: [{ kind: 'asc' }, { createdAt: 'asc' }],
-      }),
-      this.totalsByAccount(userId),
+      this.accounts.findAll(userId),
+      this.accounts.totalsByAccount(userId),
     ]);
 
     return accounts.map((account) => toAccountDto(account, totals.get(account.id)));
@@ -50,22 +25,17 @@ export class AccountsService {
   async update(userId: string, id: string, input: UpdateAccountInput): Promise<AccountDto> {
     await this.assertOwned(userId, id);
 
-    const account = await this.prisma.account.update({
-      where: { id },
-      data: {
-        ...(input.name === undefined ? {} : { name: input.name }),
-        ...(input.openingBalance === undefined
-          ? {}
-          : { openingBalance: numberToBigint(input.openingBalance) }),
-        // `null` là giá trị hợp lệ (xoá ngày chốt), nên phải phân biệt với
-        // "không gửi lên" bằng `undefined` chứ không bằng falsy.
-        ...(input.statementDay === undefined ? {} : { statementDay: input.statementDay }),
-        ...(input.dueDay === undefined ? {} : { dueDay: input.dueDay }),
-      },
-      select: ACCOUNT_SELECT,
-    });
+    const patch: AccountPatch = {
+      name: input.name,
+      ...(input.openingBalance === undefined
+        ? {}
+        : { openingBalance: numberToBigint(input.openingBalance) }),
+      statementDay: input.statementDay,
+      dueDay: input.dueDay,
+    };
 
-    const totals = await this.totalsByAccount(userId, id);
+    const account = await this.accounts.update(id, patch);
+    const totals = await this.accounts.totalsByAccount(userId, id);
 
     return toAccountDto(account, totals.get(account.id));
   }
@@ -80,7 +50,7 @@ export class AccountsService {
   async remove(userId: string, id: string): Promise<void> {
     await this.assertOwned(userId, id);
 
-    const used = await this.prisma.transaction.count({ where: { userId, accountId: id } });
+    const used = await this.accounts.countTransactions(userId, id);
 
     if (used > 0) {
       throw new ConflictException(
@@ -89,59 +59,15 @@ export class AccountsService {
       );
     }
 
-    await this.prisma.account.delete({ where: { id } });
+    await this.accounts.delete(id);
   }
 
   private async assertOwned(userId: string, id: string): Promise<void> {
-    const existing = await this.prisma.account.findFirst({
-      where: { id, userId },
-      select: { id: true },
-    });
+    const existing = await this.accounts.findOwned(userId, id);
 
     if (!existing) {
       throw new NotFoundException('Không tìm thấy nguồn tiền');
     }
-  }
-
-  /**
-   * Cộng dồn theo (account, chiều tiền) trên TOÀN BỘ lịch sử, không giới hạn kỳ.
-   *
-   * Dư nợ thẻ là một số dư tích luỹ, không phải một con số của tháng: giới hạn
-   * theo kỳ sẽ cho ra "dư nợ" bằng đúng phát sinh trong kỳ, tức sai.
-   *
-   * Khoản nội bộ KHÔNG bị loại ở đây, khác với mọi query thống kê. Đó chính là
-   * điểm mấu chốt: khoản thanh toán sao kê là thứ duy nhất làm dư nợ giảm.
-   */
-  private async totalsByAccount(
-    userId: string,
-    accountId?: string,
-  ): Promise<Map<string, AccountTotals>> {
-    const rows = await this.prisma.transaction.groupBy({
-      by: ['accountId', 'type'],
-      where: {
-        userId,
-        accountId: accountId === undefined ? { not: null } : accountId,
-      },
-      _sum: { amount: true },
-      _count: { _all: true },
-    });
-
-    const totals = new Map<string, AccountTotals>();
-
-    for (const row of rows) {
-      if (row.accountId === null) continue;
-
-      const current = totals.get(row.accountId) ?? { expense: 0n, income: 0n, count: 0 };
-      const amount = row._sum.amount ?? 0n;
-
-      totals.set(row.accountId, {
-        expense: row.type === 'expense' ? current.expense + amount : current.expense,
-        income: row.type === 'income' ? current.income + amount : current.income,
-        count: current.count + row._count._all,
-      });
-    }
-
-    return totals;
   }
 }
 

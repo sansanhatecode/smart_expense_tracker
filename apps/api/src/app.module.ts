@@ -7,6 +7,7 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { BudgetsModule } from './budgets/budgets.module';
 import { CategoriesModule } from './categories/categories.module';
 import { HealthController } from './health/health.controller';
+import { HealthRepository } from './health/health.repository';
 import { ImportsModule } from './imports/imports.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StatsModule } from './stats/stats.module';
@@ -28,6 +29,7 @@ import { TransactionsModule } from './transactions/transactions.module';
   ],
   controllers: [HealthController],
   providers: [
+    HealthRepository,
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     // Thứ tự quan trọng: throttle trước auth, để request bị rate-limit không
     // tốn công verify token.

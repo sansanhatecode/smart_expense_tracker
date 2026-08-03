@@ -6,53 +6,23 @@ import {
   type Paginated,
   type TransactionDto,
   type TransactionQuery,
-  type TransactionSort,
   type UpdateTransactionInput,
 } from '@expense/shared';
 import { toCategorySummary, toDateOnly, toMoney, toNullableMoney } from '../common/mappers';
 import { computeDedupeHash, dedupeGroupKey, normalizeDescription } from '../imports/dedupe';
-import { Prisma } from '../generated/prisma/client';
 import type { TxType } from '../generated/prisma/enums';
-import { PrismaService } from '../prisma/prisma.service';
-
-const TRANSACTION_SELECT = {
-  id: true,
-  amount: true,
-  type: true,
-  date: true,
-  description: true,
-  balance: true,
-  internalKind: true,
-  importBatchId: true,
-  createdAt: true,
-  category: {
-    select: { id: true, name: true, type: true, icon: true, color: true, sortOrder: true },
-  },
-  account: {
-    select: { id: true, name: true, kind: true },
-  },
-} as const;
-
-type TransactionRow = Prisma.TransactionGetPayload<{ select: typeof TRANSACTION_SELECT }>;
+import {
+  TransactionsRepository,
+  type TransactionPatch,
+  type TransactionRow,
+} from './transactions.repository';
 
 @Injectable()
 export class TransactionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly transactions: TransactionsRepository) {}
 
   async list(userId: string, query: TransactionQuery): Promise<Paginated<TransactionDto>> {
-    const where = this.buildWhere(userId, query);
-
-    // Chạy song song: count không phụ thuộc vào page nên không có lý do chờ tuần tự.
-    const [rows, total] = await Promise.all([
-      this.prisma.transaction.findMany({
-        where,
-        select: TRANSACTION_SELECT,
-        orderBy: orderByOf(query.sort),
-        skip: (query.page - 1) * query.limit,
-        take: query.limit,
-      }),
-      this.prisma.transaction.count({ where }),
-    ]);
+    const { rows, total } = await this.transactions.findPage(userId, query);
 
     return {
       items: rows.map(toTransactionDto),
@@ -91,27 +61,23 @@ export class TransactionsService {
       normalizedDescription,
     );
 
-    const row = await this.prisma.transaction.create({
-      data: {
+    const row = await this.transactions.create(userId, {
+      categoryId: input.categoryId,
+      accountId: input.accountId,
+      amount,
+      type: input.type,
+      date: input.date,
+      description: input.description,
+      balance: input.balance === null ? null : numberToBigint(input.balance),
+      internalKind: input.internalKind,
+      dedupeHash: computeDedupeHash({
         userId,
-        categoryId: input.categoryId,
-        accountId: input.accountId,
+        date: input.date,
         amount,
         type: input.type,
-        date: new Date(`${input.date}T00:00:00.000Z`),
-        description: input.description,
-        balance: input.balance === null ? null : numberToBigint(input.balance),
-        internalKind: input.internalKind,
-        dedupeHash: computeDedupeHash({
-          userId,
-          date: input.date,
-          amount,
-          type: input.type,
-          normalizedDescription,
-          seq,
-        }),
-      },
-      select: TRANSACTION_SELECT,
+        normalizedDescription,
+        seq,
+      }),
     });
 
     return toTransactionDto(row);
@@ -122,10 +88,7 @@ export class TransactionsService {
     id: string,
     input: UpdateTransactionInput,
   ): Promise<TransactionDto> {
-    const existing = await this.prisma.transaction.findFirst({
-      where: { id, userId },
-      select: { id: true, type: true },
-    });
+    const existing = await this.transactions.findOwned(userId, id);
 
     if (!existing) {
       throw new NotFoundException('Không tìm thấy giao dịch');
@@ -146,41 +109,34 @@ export class TransactionsService {
      * liệu GỐC từ file. Nếu người dùng sửa mô tả rồi hash đổi theo, thì import
      * lại đúng file đó sẽ không còn nhận ra trùng và sinh thêm một bản.
      */
-    const row = await this.prisma.transaction.update({
-      where: { id },
-      data: {
-        ...(input.amount !== undefined ? { amount: numberToBigint(input.amount) } : {}),
-        ...(input.type !== undefined ? { type: input.type } : {}),
-        ...(input.date !== undefined
-          ? { date: new Date(`${input.date}T00:00:00.000Z`) }
-          : {}),
-        ...(input.description !== undefined ? { description: input.description } : {}),
-        ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
-        ...(input.accountId !== undefined ? { accountId: input.accountId } : {}),
-        ...(input.balance !== undefined
-          ? { balance: input.balance === null ? null : numberToBigint(input.balance) }
-          : {}),
-        // Van an toàn cho nhận diện sai của import. Ví dụ người dùng trả hộ thẻ
-        // của người khác: đó là chi tiêu thật, và họ phải bỏ đánh dấu được.
-        ...(input.internalKind !== undefined ? { internalKind: input.internalKind } : {}),
-      },
-      select: TRANSACTION_SELECT,
-    });
+    const patch: TransactionPatch = {
+      ...(input.amount !== undefined ? { amount: numberToBigint(input.amount) } : {}),
+      type: input.type,
+      date: input.date,
+      description: input.description,
+      categoryId: input.categoryId,
+      accountId: input.accountId,
+      ...(input.balance !== undefined
+        ? { balance: input.balance === null ? null : numberToBigint(input.balance) }
+        : {}),
+      // Van an toàn cho nhận diện sai của import. Ví dụ người dùng trả hộ thẻ
+      // của người khác: đó là chi tiêu thật, và họ phải bỏ đánh dấu được.
+      internalKind: input.internalKind,
+    };
+
+    const row = await this.transactions.update(id, patch);
 
     return toTransactionDto(row);
   }
 
   async remove(userId: string, id: string): Promise<void> {
-    const existing = await this.prisma.transaction.findFirst({
-      where: { id, userId },
-      select: { id: true },
-    });
+    const existing = await this.transactions.findOwned(userId, id);
 
     if (!existing) {
       throw new NotFoundException('Không tìm thấy giao dịch');
     }
 
-    await this.prisma.transaction.delete({ where: { id } });
+    await this.transactions.delete(id);
   }
 
   /**
@@ -194,69 +150,16 @@ export class TransactionsService {
       await this.assertOwnsCategory(userId, input.categoryId);
     }
 
-    // `userId` trong where là thứ chặn việc sửa giao dịch của người khác bằng
-    // cách nhồi id lạ vào danh sách.
-    const result = await this.prisma.transaction.updateMany({
-      where: { id: { in: input.transactionIds }, userId },
-      data: { categoryId: input.categoryId },
-    });
+    const updated = await this.transactions.setCategoryMany(
+      userId,
+      input.transactionIds,
+      input.categoryId,
+    );
 
-    return { updated: result.count };
+    return { updated };
   }
 
-  private buildWhere(userId: string, query: TransactionQuery): Prisma.TransactionWhereInput {
-    const where: Prisma.TransactionWhereInput = { userId };
-
-    if (query.from || query.to) {
-      where.date = {
-        ...(query.from ? { gte: new Date(`${query.from}T00:00:00.000Z`) } : {}),
-        // `to` là bao gồm: lte đúng ngày đó, không phải lt.
-        ...(query.to ? { lte: new Date(`${query.to}T00:00:00.000Z`) } : {}),
-      };
-    }
-
-    // `uncategorized` thắng `categoryId` khi cả hai được truyền — chúng loại trừ
-    // nhau, và lọc "chưa phân loại" là ý định cụ thể hơn.
-    if (query.uncategorized) {
-      where.categoryId = null;
-    } else if (query.categoryId) {
-      where.categoryId = query.categoryId;
-    }
-
-    if (query.type) {
-      where.type = query.type;
-    }
-
-    if (query.accountId) {
-      where.accountId = query.accountId;
-    }
-
-    // `only` chính là màn hình "các khoản đã bị loại khỏi thống kê" — không cần
-    // dựng route riêng cho nó.
-    if (query.internal === 'only') {
-      where.internalKind = { not: null };
-    } else if (query.internal === 'exclude') {
-      where.internalKind = null;
-    }
-
-    if (query.importBatchId) {
-      where.importBatchId = query.importBatchId;
-    }
-
-    if (query.q) {
-      where.description = { contains: query.q, mode: 'insensitive' };
-    }
-
-    return where;
-  }
-
-  /**
-   * Đếm số giao dịch đã có cùng khoá dedupe, kể cả phần mô tả đã normalize.
-   *
-   * Phải đọc mô tả ra rồi normalize trong app: DB không lưu cột normalized, và
-   * thêm cột đó chỉ để phục vụ việc này thì không đáng — số dòng trong một nhóm
-   * (cùng ngày, cùng số tiền, cùng chiều) luôn rất nhỏ.
-   */
+  /** Đếm số giao dịch đã có cùng khoá dedupe, kể cả phần mô tả đã normalize. */
   private async countSameGroup(
     userId: string,
     date: string,
@@ -264,20 +167,22 @@ export class TransactionsService {
     type: TxType,
     normalizedDescription: string,
   ): Promise<number> {
-    const candidates = await this.prisma.transaction.findMany({
-      where: { userId, date: new Date(`${date}T00:00:00.000Z`), amount, type },
-      select: { description: true },
-    });
+    const descriptions = await this.transactions.findDescriptionsInGroup(
+      userId,
+      date,
+      amount,
+      type,
+    );
 
     const target = dedupeGroupKey({ date, amount, type, normalizedDescription });
 
-    return candidates.filter(
-      (candidate) =>
+    return descriptions.filter(
+      (description) =>
         dedupeGroupKey({
           date,
           amount,
           type,
-          normalizedDescription: normalizeDescription(candidate.description),
+          normalizedDescription: normalizeDescription(description),
         }) === target,
     ).length;
   }
@@ -293,10 +198,7 @@ export class TransactionsService {
     categoryId: string,
     type?: TxType,
   ): Promise<void> {
-    const category = await this.prisma.category.findFirst({
-      where: { id: categoryId, userId },
-      select: { id: true, type: true, name: true },
-    });
+    const category = await this.transactions.findOwnedCategory(userId, categoryId);
 
     if (!category) {
       throw new NotFoundException('Không tìm thấy danh mục');
@@ -312,31 +214,11 @@ export class TransactionsService {
 
   /** Chặn việc gắn giao dịch vào nguồn tiền của user khác bằng cách nhồi id lạ. */
   private async assertOwnsAccount(userId: string, accountId: string): Promise<void> {
-    const account = await this.prisma.account.findFirst({
-      where: { id: accountId, userId },
-      select: { id: true },
-    });
+    const account = await this.transactions.findOwnedAccount(userId, accountId);
 
     if (!account) {
       throw new NotFoundException('Không tìm thấy nguồn tiền');
     }
-  }
-}
-
-function orderByOf(sort: TransactionSort): Prisma.TransactionOrderByWithRelationInput[] {
-  switch (sort) {
-    case 'date_asc':
-      return [{ date: 'asc' }, { createdAt: 'asc' }];
-    case 'amount_desc':
-      return [{ amount: 'desc' }, { date: 'desc' }];
-    case 'amount_asc':
-      return [{ amount: 'asc' }, { date: 'desc' }];
-    case 'date_desc':
-    default:
-      // createdAt là tiebreaker để thứ tự ổn định giữa các lần phân trang —
-      // thiếu nó thì hai giao dịch cùng ngày có thể đổi chỗ và dòng bị lặp/mất
-      // khi người dùng sang trang.
-      return [{ date: 'desc' }, { createdAt: 'desc' }];
   }
 }
 

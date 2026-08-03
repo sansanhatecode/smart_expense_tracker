@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { DEFAULT_CATEGORIES } from '../categories/default-categories';
 import { maskEmail } from '../common/mask-email';
 import { requestTag } from '../common/request-context';
-import { PrismaService } from '../prisma/prisma.service';
+import { AuthRepository, type CreatedCategory, type RuleSeed } from './auth.repository';
 import { TokenService, type IssuedTokens, type TokenContext } from './token.service';
 
 export interface AuthResult extends IssuedTokens {
@@ -40,17 +40,14 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly users: AuthRepository,
     private readonly tokens: TokenService,
   ) {
     this.dummyHash = argonHash(randomBytes(32).toString('hex'), ARGON_OPTIONS);
   }
 
   async register(input: RegisterInput, context: TokenContext): Promise<AuthResult> {
-    const existing = await this.prisma.user.findUnique({
-      where: { email: input.email },
-      select: { id: true },
-    });
+    const existing = await this.users.findIdByEmail(input.email);
 
     if (existing) {
       this.logger.warn(`Đăng ký trùng email: ${maskEmail(input.email)}${requestTag()}`);
@@ -59,55 +56,17 @@ export class AuthService {
 
     const passwordHash = await argonHash(input.password, ARGON_OPTIONS);
 
-    // Tạo user và bộ danh mục mặc định trong cùng một transaction: một tài khoản
-    // tồn tại mà không có danh mục nào là trạng thái không dùng được, nên không
-    // được để nó xảy ra dù chỉ tạm thời.
-    const user = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.user.create({
-        data: {
-          email: input.email,
-          passwordHash,
-          name: input.name ?? null,
-        },
-        select: { id: true, email: true, name: true },
-      });
-
-      await tx.category.createMany({
-        data: DEFAULT_CATEGORIES.map((category) => ({
-          userId: created.id,
-          name: category.name,
-          type: category.type,
-          icon: category.icon,
-          color: category.color,
-          sortOrder: category.sortOrder,
-        })),
-      });
-
-      // Rule auto-categorize: cần id của category vừa tạo nên phải đọc lại.
-      const categories = await tx.category.findMany({
-        where: { userId: created.id },
-        select: { id: true, name: true, type: true },
-      });
-
-      const idByKey = new Map(categories.map((c) => [`${c.type}:${c.name}`, c.id]));
-
-      const rules = DEFAULT_CATEGORIES.flatMap((category) => {
-        const categoryId = idByKey.get(`${category.type}:${category.name}`);
-        if (!categoryId) return [];
-        return category.keywords.map((keyword) => ({
-          userId: created.id,
-          keyword: keyword.toUpperCase(),
-          categoryId,
-          priority: 0,
-        }));
-      });
-
-      if (rules.length > 0) {
-        await tx.categoryRule.createMany({ data: rules, skipDuplicates: true });
-      }
-
-      return created;
-    });
+    const user = await this.users.createUserWithDefaults(
+      { email: input.email, passwordHash, name: input.name ?? null },
+      DEFAULT_CATEGORIES.map((category) => ({
+        name: category.name,
+        type: category.type,
+        icon: category.icon,
+        color: category.color,
+        sortOrder: category.sortOrder,
+      })),
+      defaultRulesFor,
+    );
 
     this.logger.log(`Tài khoản mới: ${maskEmail(user.email)} id=${user.id}${requestTag()}`);
 
@@ -116,10 +75,7 @@ export class AuthService {
   }
 
   async login(input: LoginInput, context: TokenContext): Promise<AuthResult> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: input.email },
-      select: { id: true, email: true, name: true, passwordHash: true },
-    });
+    const user = await this.users.findCredentialsByEmail(input.email);
 
     // Vẫn verify kể cả khi không có user — xem chú thích ở `dummyHash`.
     const passwordHash = user?.passwordHash ?? (await this.dummyHash);
@@ -155,10 +111,7 @@ export class AuthService {
   }
 
   async me(userId: string): Promise<UserDto> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, email: true, name: true },
-    });
+    const user = await this.users.findById(userId);
 
     if (!user) {
       throw new UnauthorizedException('Phiên đăng nhập không hợp lệ');
@@ -166,4 +119,25 @@ export class AuthService {
 
     return user;
   }
+}
+
+/**
+ * Rule auto-categorize mặc định, ghép keyword của `DEFAULT_CATEGORIES` vào id
+ * của danh mục vừa được tạo.
+ *
+ * Khoá là `type:name` chứ không chỉ `name`: một cái tên có thể xuất hiện ở cả
+ * chiều thu và chi.
+ */
+function defaultRulesFor(created: CreatedCategory[]): RuleSeed[] {
+  const idByKey = new Map(created.map((c) => [`${c.type}:${c.name}`, c.id]));
+
+  return DEFAULT_CATEGORIES.flatMap((category) => {
+    const categoryId = idByKey.get(`${category.type}:${category.name}`);
+    if (!categoryId) return [];
+    return category.keywords.map((keyword) => ({
+      keyword: keyword.toUpperCase(),
+      categoryId,
+      priority: 0,
+    }));
+  });
 }

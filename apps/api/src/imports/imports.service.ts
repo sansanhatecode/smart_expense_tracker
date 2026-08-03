@@ -20,52 +20,32 @@ import type {
 import { detectAccount } from './account-detect';
 import { beatsBest } from './detect-profile';
 import { AUTO_DETECT_CANDIDATES, findProfile } from './bank-profiles';
-import { categorize, type CategorizerRule, type MccRuleMap } from './categorizer';
+import { categorize } from './categorizer';
 import { assignSequences, computeDedupeHash } from './dedupe';
 import { detectFormat, explainUnsupported } from './detect-format';
 import { buildMccRules } from './mcc';
 import { normalize } from './normalizer';
 import { CsvParser } from './parsers/csv.parser';
 import { XlsxParser } from './parsers/xlsx.parser';
+import { ImportsRepository, type StagedInsert, type StagedRow } from './imports.repository';
 import type {
   BankProfile,
-  NormalizedTransaction,
   SkippedRow,
   StatementParser,
   UploadedFile,
 } from './types';
 import { toCategorySummary, toDateOnly, toMoney, toNullableMoney } from '../common/mappers';
 import { env } from '../config/env';
-import { Prisma } from '../generated/prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
 
 /** Batch pending cũ hơn mốc này bị dọn — người dùng đã bỏ giữa đường. */
 const PENDING_BATCH_TTL_MS = 24 * 60 * 60 * 1000;
-
-const STAGED_SELECT = {
-  id: true,
-  rowIndex: true,
-  amount: true,
-  type: true,
-  date: true,
-  description: true,
-  balance: true,
-  duplicate: true,
-  selected: true,
-  rawLine: true,
-  category: {
-    select: { id: true, name: true, type: true, icon: true, color: true, sortOrder: true },
-  },
-} as const;
-
-type StagedRow = Prisma.StagedTransactionGetPayload<{ select: typeof STAGED_SELECT }>;
 
 @Injectable()
 export class ImportsService {
   private readonly logger = new Logger(ImportsService.name);
   private readonly parsers: StatementParser[] = [new CsvParser(), new XlsxParser()];
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly imports: ImportsRepository) {}
 
   /**
    * Upload → parse → normalize → categorize → dedupe → ghi vào bảng staging.
@@ -124,70 +104,53 @@ export class ImportsService {
       }),
     }));
 
-    const [existingHashes, rules, mccRules] = await Promise.all([
-      this.findExistingHashes(
+    const [existingHashes, rules, categories] = await Promise.all([
+      this.imports.findExistingHashes(
         userId,
         hashed.map((row) => row.dedupeHash),
       ),
-      this.loadRules(userId),
-      this.loadMccRules(userId),
+      this.imports.findRules(userId),
+      // Bảng MCC là hằng số trong code và chỉ biết TÊN danh mục — id thì mỗi user
+      // một khác, nên phải đọc danh mục ra để dựng bảng tra. Xem đầu ./mcc.ts.
+      this.imports.findCategories(userId),
     ]);
+
+    const mccRules = buildMccRules(categories);
 
     void this.cleanupStalePendingBatches(userId);
 
-    const batch = await this.prisma.$transaction(async (tx) => {
-      // upsert chứ không create: import cùng ngân hàng tháng sau phải rơi vào
-      // đúng account cũ. `update: {}` để không ghi đè tên người dùng đã sửa.
-      const account = await tx.account.upsert({
-        where: { userId_fingerprint: { userId, fingerprint: detected.fingerprint } },
-        create: {
-          userId,
-          fingerprint: detected.fingerprint,
-          name: detected.name,
-          kind: detected.kind,
-        },
-        update: {},
-        select: { id: true },
-      });
+    const rows: StagedInsert[] = hashed.map((row) => {
+      const isDuplicate = existingHashes.has(row.dedupeHash);
 
-      const created = await tx.importBatch.create({
-        data: {
-          userId,
-          source: parser.source,
-          fileName: file.originalName,
-          bankProfile: profile.id,
-          accountId: account.id,
-          rowCount: hashed.length,
-          status: 'pending',
-        },
-        select: { id: true, createdAt: true },
-      });
+      return {
+        rowIndex: row.rowIndex,
+        categoryId: categorize(row, rules, mccRules),
+        amount: row.amount,
+        type: row.type,
+        date: row.date,
+        description: row.description,
+        balance: row.balance,
+        dedupeHash: row.dedupeHash,
+        internalKind: row.internalKind,
+        duplicate: isDuplicate ? 'in_db' : 'none',
+        // Dòng trùng mặc định BỎ TICK: mặc định an toàn là không thêm lại thứ
+        // đã có. Người dùng vẫn tick lại được nếu biết mình đang làm gì.
+        selected: !isDuplicate,
+        rawLine: row.raw,
+      };
+    });
 
-      await tx.stagedTransaction.createMany({
-        data: hashed.map((row) => {
-          const isDuplicate = existingHashes.has(row.dedupeHash);
-          return {
-            batchId: created.id,
-            rowIndex: row.rowIndex,
-            categoryId: categorize(row, rules, mccRules),
-            accountId: account.id,
-            amount: row.amount,
-            type: row.type,
-            date: new Date(`${row.date}T00:00:00.000Z`),
-            description: row.description,
-            balance: row.balance,
-            dedupeHash: row.dedupeHash,
-            internalKind: row.internalKind,
-            duplicate: isDuplicate ? ('in_db' as const) : ('none' as const),
-            // Dòng trùng mặc định BỎ TICK: mặc định an toàn là không thêm lại thứ
-            // đã có. Người dùng vẫn tick lại được nếu biết mình đang làm gì.
-            selected: !isDuplicate,
-            rawLine: row.raw,
-          };
-        }),
-      });
-
-      return created;
+    const batch = await this.imports.createBatch({
+      userId,
+      source: parser.source,
+      fileName: file.originalName,
+      bankProfile: profile.id,
+      account: {
+        fingerprint: detected.fingerprint,
+        name: detected.name,
+        kind: detected.kind,
+      },
+      rows,
     });
 
     return this.buildPreview(userId, batch.id, skipped);
@@ -201,22 +164,7 @@ export class ImportsService {
   }
 
   async listBatches(userId: string): Promise<ImportBatchDto[]> {
-    const rows = await this.prisma.importBatch.findMany({
-      where: { userId },
-      select: {
-        id: true,
-        fileName: true,
-        source: true,
-        bankProfile: true,
-        status: true,
-        rowCount: true,
-        createdAt: true,
-        confirmedAt: true,
-        _count: { select: { transactions: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
+    const rows = await this.imports.findBatches(userId);
 
     return rows.map((row) => ({
       id: row.id,
@@ -243,22 +191,15 @@ export class ImportsService {
       await this.assertOwnsCategory(userId, input.categoryId);
     }
 
-    const existing = await this.prisma.stagedTransaction.findFirst({
-      where: { id: rowId, batchId },
-      select: { id: true },
-    });
+    const existing = await this.imports.findStagedRow(batchId, rowId);
 
     if (!existing) {
       throw new NotFoundException('Không tìm thấy dòng này trong batch');
     }
 
-    const row = await this.prisma.stagedTransaction.update({
-      where: { id: rowId },
-      data: {
-        ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
-        ...(input.selected !== undefined ? { selected: input.selected } : {}),
-      },
-      select: STAGED_SELECT,
+    const row = await this.imports.updateStagedRow(rowId, {
+      categoryId: input.categoryId,
+      selected: input.selected,
     });
 
     return toStagedRowDto(row);
@@ -276,84 +217,25 @@ export class ImportsService {
       await this.assertOwnsCategory(userId, input.categoryId);
     }
 
-    // `batchId` trong where là thứ chặn việc sửa dòng của batch khác bằng cách
-    // nhồi id lạ vào danh sách.
-    const result = await this.prisma.stagedTransaction.updateMany({
-      where: { id: { in: input.rowIds }, batchId },
-      data: {
-        ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
-        ...(input.selected !== undefined ? { selected: input.selected } : {}),
-      },
+    const updated = await this.imports.updateStagedRows(batchId, input.rowIds, {
+      categoryId: input.categoryId,
+      selected: input.selected,
     });
 
-    return { updated: result.count };
+    return { updated };
   }
 
-  /**
-   * Commit batch: copy dòng đã tick sang `Transaction`.
-   *
-   * Toàn bộ nằm trong một DB transaction. Nếu tách ra, một lần crash giữa đường
-   * để lại batch vừa có giao dịch vừa còn staged — không rollback được mà cũng
-   * không confirm lại được.
-   */
+  /** Commit batch: copy dòng đã tick sang `Transaction`. */
   async confirm(userId: string, batchId: string): Promise<ConfirmImportResultDto> {
     await this.assertPendingBatch(userId, batchId);
 
-    return this.prisma.$transaction(async (tx) => {
-      const staged = await tx.stagedTransaction.findMany({
-        where: { batchId },
-        select: {
-          rowIndex: true,
-          categoryId: true,
-          accountId: true,
-          amount: true,
-          type: true,
-          date: true,
-          description: true,
-          balance: true,
-          dedupeHash: true,
-          internalKind: true,
-          selected: true,
-        },
-        orderBy: { rowIndex: 'asc' },
-      });
+    const { inserted, staged } = await this.imports.confirmBatch(userId, batchId);
 
-      const toInsert = staged.filter((row) => row.selected);
-
-      const inserted = await tx.transaction.createMany({
-        data: toInsert.map((row) => ({
-          userId,
-          categoryId: row.categoryId,
-          accountId: row.accountId,
-          amount: row.amount,
-          type: row.type,
-          date: row.date,
-          description: row.description,
-          balance: row.balance,
-          dedupeHash: row.dedupeHash,
-          internalKind: row.internalKind,
-          importBatchId: batchId,
-        })),
-        // Chặn race: nếu cùng lúc có batch khác confirm dòng trùng hash thì bỏ
-        // qua thay vì làm cả lần confirm thất bại.
-        skipDuplicates: true,
-      });
-
-      await tx.importBatch.update({
-        where: { id: batchId },
-        data: { status: 'confirmed', confirmedAt: new Date() },
-      });
-
-      // Xoá staged sau khi copy: giữ lại chỉ làm dữ liệu tồn tại hai nơi, và
-      // rollback đã có `importBatchId` để tìm lại giao dịch.
-      await tx.stagedTransaction.deleteMany({ where: { batchId } });
-
-      return {
-        batchId,
-        inserted: inserted.count,
-        skipped: staged.length - inserted.count,
-      };
-    });
+    return {
+      batchId,
+      inserted,
+      skipped: staged - inserted,
+    };
   }
 
   /**
@@ -365,10 +247,7 @@ export class ImportsService {
    * từng có lần import này và nó đã bị hoàn lại.
    */
   async rollback(userId: string, batchId: string): Promise<{ removed: number }> {
-    const batch = await this.prisma.importBatch.findFirst({
-      where: { id: batchId, userId },
-      select: { id: true, status: true },
-    });
+    const batch = await this.imports.findOwnedBatch(userId, batchId);
 
     if (!batch) {
       throw new NotFoundException('Không tìm thấy lần import này');
@@ -379,22 +258,13 @@ export class ImportsService {
     }
 
     if (batch.status === 'pending') {
-      await this.prisma.importBatch.delete({ where: { id: batchId } });
+      await this.imports.deleteBatch(batchId);
       return { removed: 0 };
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const deleted = await tx.transaction.deleteMany({
-        where: { importBatchId: batchId, userId },
-      });
+    const removed = await this.imports.rollbackConfirmedBatch(userId, batchId);
 
-      await tx.importBatch.update({
-        where: { id: batchId },
-        data: { status: 'rolled_back' },
-      });
-
-      return { removed: deleted.count };
-    });
+    return { removed };
   }
 
   // ─── Nội bộ ────────────────────────────────────────────────────────────────
@@ -515,79 +385,16 @@ export class ImportsService {
   }
 
   /**
-   * Tìm những hash đã có trong DB.
-   *
-   * Chia lô để câu `IN (...)` không phình quá lớn với file 10.000 dòng — Postgres
-   * xử lý được, nhưng driver và log thì bắt đầu khó chịu.
-   */
-  private async findExistingHashes(userId: string, hashes: string[]): Promise<Set<string>> {
-    const found = new Set<string>();
-    const CHUNK = 1_000;
-
-    for (let i = 0; i < hashes.length; i += CHUNK) {
-      const chunk = hashes.slice(i, i + CHUNK);
-      const rows = await this.prisma.transaction.findMany({
-        where: { userId, dedupeHash: { in: chunk } },
-        select: { dedupeHash: true },
-      });
-      for (const row of rows) found.add(row.dedupeHash);
-    }
-
-    return found;
-  }
-
-  private async loadRules(userId: string): Promise<CategorizerRule[]> {
-    const rows = await this.prisma.categoryRule.findMany({
-      where: { userId },
-      select: {
-        keyword: true,
-        categoryId: true,
-        priority: true,
-        category: { select: { type: true } },
-      },
-    });
-
-    return rows.map((row) => ({
-      keyword: row.keyword,
-      categoryId: row.categoryId,
-      categoryType: row.category.type,
-      priority: row.priority,
-    }));
-  }
-
-  /**
-   * Bảng MCC → danh mục cho riêng user này.
-   *
-   * Phải đọc danh mục (không phải rule) vì bảng MCC là hằng số trong code và chỉ
-   * biết TÊN danh mục — id thì mỗi user một khác. Xem chú thích đầu ./mcc.ts.
-   *
-   * Đọc cả danh mục thu lẫn chi dù bảng MCC hiện chỉ có danh mục chi: `categorize`
-   * đối chiếu `categoryType` để chặn dòng hoàn tiền (thu) nhận danh mục chi, và
-   * việc đối chiếu đó chỉ đúng khi dữ liệu vào không bị lọc trước.
-   */
-  private async loadMccRules(userId: string): Promise<MccRuleMap> {
-    const categories = await this.prisma.category.findMany({
-      where: { userId },
-      select: { id: true, name: true, type: true },
-    });
-
-    return buildMccRules(categories);
-  }
-
-  /**
    * Dọn batch pending bị bỏ giữa đường. Gọi lazy khi tạo batch mới, không cần cron
    * — API là process long-running nên cron làm được, nhưng thêm hạ tầng cho một
    * việc này thì không đáng.
    */
   private async cleanupStalePendingBatches(userId: string): Promise<void> {
     try {
-      await this.prisma.importBatch.deleteMany({
-        where: {
-          userId,
-          status: 'pending',
-          createdAt: { lt: new Date(Date.now() - PENDING_BATCH_TTL_MS) },
-        },
-      });
+      await this.imports.deleteStalePendingBatches(
+        userId,
+        new Date(Date.now() - PENDING_BATCH_TTL_MS),
+      );
     } catch (error) {
       // Dọn rác thất bại không được làm hỏng việc import.
       this.logger.warn(`Không dọn được batch pending cũ: ${String(error)}`);
@@ -595,10 +402,7 @@ export class ImportsService {
   }
 
   private async assertPendingBatch(userId: string, batchId: string): Promise<void> {
-    const batch = await this.prisma.importBatch.findFirst({
-      where: { id: batchId, userId },
-      select: { status: true },
-    });
+    const batch = await this.imports.findOwnedBatch(userId, batchId);
 
     if (!batch) {
       throw new NotFoundException('Không tìm thấy lần import này');
@@ -614,10 +418,7 @@ export class ImportsService {
   }
 
   private async assertOwnsCategory(userId: string, categoryId: string): Promise<void> {
-    const category = await this.prisma.category.findFirst({
-      where: { id: categoryId, userId },
-      select: { id: true },
-    });
+    const category = await this.imports.findOwnedCategory(userId, categoryId);
 
     if (!category) {
       throw new NotFoundException('Không tìm thấy danh mục');
@@ -629,19 +430,7 @@ export class ImportsService {
     batchId: string,
     skipped: SkippedRow[],
   ): Promise<ImportPreviewDto> {
-    const batch = await this.prisma.importBatch.findFirst({
-      where: { id: batchId, userId },
-      select: {
-        id: true,
-        fileName: true,
-        source: true,
-        bankProfile: true,
-        status: true,
-        createdAt: true,
-        account: { select: { id: true, name: true, kind: true } },
-        staged: { select: STAGED_SELECT, orderBy: { rowIndex: 'asc' } },
-      },
-    });
+    const batch = await this.imports.findBatchWithStaged(userId, batchId);
 
     if (!batch) {
       throw new NotFoundException('Không tìm thấy lần import này');

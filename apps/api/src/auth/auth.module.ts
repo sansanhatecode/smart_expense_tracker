@@ -3,7 +3,9 @@ import { JwtModule } from '@nestjs/jwt';
 import type { SignOptions } from 'jsonwebtoken';
 import { env } from '../config/env';
 import { AuthController } from './auth.controller';
+import { AuthRepository } from './auth.repository';
 import { AuthService } from './auth.service';
+import { TokenRepository } from './token.repository';
 import { TokenService } from './token.service';
 
 @Module({
@@ -15,7 +17,7 @@ import { TokenService } from './token.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, TokenService],
+  providers: [AuthService, AuthRepository, TokenService, TokenRepository],
   // JwtModule được export để JwtAuthGuard (đăng ký toàn cục ở AppModule) dùng
   // được JwtService với cùng secret.
   exports: [JwtModule, TokenService],

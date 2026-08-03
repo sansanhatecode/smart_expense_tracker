@@ -8,43 +8,25 @@ import type {
   UpdateCategoryRuleInput,
 } from '@expense/shared';
 import { toCategoryDto, toCategorySummary } from '../common/mappers';
-import { PrismaService } from '../prisma/prisma.service';
-
-const CATEGORY_SELECT = {
-  id: true,
-  name: true,
-  type: true,
-  icon: true,
-  color: true,
-  sortOrder: true,
-} as const;
+import { CategoriesRepository, type RuleRow } from './categories.repository';
 
 @Injectable()
 export class CategoriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly categories: CategoriesRepository) {}
 
   async list(userId: string): Promise<CategoryDto[]> {
-    const rows = await this.prisma.category.findMany({
-      where: { userId },
-      select: { ...CATEGORY_SELECT, _count: { select: { transactions: true } } },
-      // Thu trước chi, rồi theo sortOrder — thứ tự ổn định để UI không nhảy.
-      orderBy: [{ type: 'asc' }, { sortOrder: 'asc' }, { name: 'asc' }],
-    });
+    const rows = await this.categories.findAll(userId);
 
     return rows.map(toCategoryDto);
   }
 
   async create(userId: string, input: CreateCategoryInput): Promise<CategoryDto> {
-    const row = await this.prisma.category.create({
-      data: {
-        userId,
-        name: input.name,
-        type: input.type,
-        icon: input.icon,
-        color: input.color,
-        sortOrder: input.sortOrder,
-      },
-      select: CATEGORY_SELECT,
+    const row = await this.categories.create(userId, {
+      name: input.name,
+      type: input.type,
+      icon: input.icon,
+      color: input.color,
+      sortOrder: input.sortOrder,
     });
 
     return toCategoryDto(row);
@@ -55,10 +37,7 @@ export class CategoriesService {
     id: string,
     input: UpdateCategoryInput,
   ): Promise<CategoryDto> {
-    const existing = await this.prisma.category.findFirst({
-      where: { id, userId },
-      select: { id: true, type: true, _count: { select: { transactions: true } } },
-    });
+    const existing = await this.categories.findOwned(userId, id);
 
     // Lọc theo userId rồi trả 404 (không phải 403) khi không thấy: 403 sẽ tiết
     // lộ rằng id đó có tồn tại và thuộc người khác.
@@ -77,16 +56,12 @@ export class CategoriesService {
       }
     }
 
-    const row = await this.prisma.category.update({
-      where: { id },
-      data: {
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.type !== undefined ? { type: input.type } : {}),
-        ...(input.icon !== undefined ? { icon: input.icon } : {}),
-        ...(input.color !== undefined ? { color: input.color } : {}),
-        ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
-      },
-      select: CATEGORY_SELECT,
+    const row = await this.categories.update(id, {
+      name: input.name,
+      type: input.type,
+      icon: input.icon,
+      color: input.color,
+      sortOrder: input.sortOrder,
     });
 
     return toCategoryDto(row);
@@ -101,16 +76,13 @@ export class CategoriesService {
    * làm mất dữ liệu gốc.
    */
   async remove(userId: string, id: string): Promise<{ untaggedTransactions: number }> {
-    const existing = await this.prisma.category.findFirst({
-      where: { id, userId },
-      select: { id: true, _count: { select: { transactions: true } } },
-    });
+    const existing = await this.categories.findOwned(userId, id);
 
     if (!existing) {
       throw new NotFoundException('Không tìm thấy danh mục');
     }
 
-    await this.prisma.category.delete({ where: { id } });
+    await this.categories.delete(id);
 
     return { untaggedTransactions: existing._count.transactions };
   }
@@ -118,51 +90,22 @@ export class CategoriesService {
   // ─── Rule auto-categorize ──────────────────────────────────────────────────
 
   async listRules(userId: string): Promise<CategoryRuleDto[]> {
-    const rows = await this.prisma.categoryRule.findMany({
-      where: { userId },
-      select: {
-        id: true,
-        keyword: true,
-        priority: true,
-        category: { select: CATEGORY_SELECT },
-      },
-      // priority cao trước, để danh sách hiển thị đúng thứ tự thắng khi khớp.
-      orderBy: [{ priority: 'desc' }, { keyword: 'asc' }],
-    });
+    const rows = await this.categories.findAllRules(userId);
 
-    return rows.map((row) => ({
-      id: row.id,
-      keyword: row.keyword,
-      priority: row.priority,
-      category: toCategorySummary(row.category)!,
-    }));
+    return rows.map(toRuleDto);
   }
 
   async createRule(userId: string, input: CreateCategoryRuleInput): Promise<CategoryRuleDto> {
     await this.assertOwnsCategory(userId, input.categoryId);
 
-    const row = await this.prisma.categoryRule.create({
-      data: {
-        userId,
-        // Uppercase ở đúng một chỗ (đây), để so khớp không phải lo về hoa thường.
-        keyword: input.keyword.toUpperCase(),
-        categoryId: input.categoryId,
-        priority: input.priority,
-      },
-      select: {
-        id: true,
-        keyword: true,
-        priority: true,
-        category: { select: CATEGORY_SELECT },
-      },
+    const row = await this.categories.createRule(userId, {
+      // Uppercase ở đúng một chỗ (đây), để so khớp không phải lo về hoa thường.
+      keyword: input.keyword.toUpperCase(),
+      categoryId: input.categoryId,
+      priority: input.priority,
     });
 
-    return {
-      id: row.id,
-      keyword: row.keyword,
-      priority: row.priority,
-      category: toCategorySummary(row.category)!,
-    };
+    return toRuleDto(row);
   }
 
   async updateRule(
@@ -170,10 +113,7 @@ export class CategoriesService {
     id: string,
     input: UpdateCategoryRuleInput,
   ): Promise<CategoryRuleDto> {
-    const existing = await this.prisma.categoryRule.findFirst({
-      where: { id, userId },
-      select: { id: true },
-    });
+    const existing = await this.categories.findOwnedRule(userId, id);
 
     if (!existing) {
       throw new NotFoundException('Không tìm thấy rule');
@@ -183,40 +123,23 @@ export class CategoriesService {
       await this.assertOwnsCategory(userId, input.categoryId);
     }
 
-    const row = await this.prisma.categoryRule.update({
-      where: { id },
-      data: {
-        ...(input.keyword !== undefined ? { keyword: input.keyword.toUpperCase() } : {}),
-        ...(input.categoryId !== undefined ? { categoryId: input.categoryId } : {}),
-        ...(input.priority !== undefined ? { priority: input.priority } : {}),
-      },
-      select: {
-        id: true,
-        keyword: true,
-        priority: true,
-        category: { select: CATEGORY_SELECT },
-      },
+    const row = await this.categories.updateRule(id, {
+      ...(input.keyword !== undefined ? { keyword: input.keyword.toUpperCase() } : {}),
+      categoryId: input.categoryId,
+      priority: input.priority,
     });
 
-    return {
-      id: row.id,
-      keyword: row.keyword,
-      priority: row.priority,
-      category: toCategorySummary(row.category)!,
-    };
+    return toRuleDto(row);
   }
 
   async removeRule(userId: string, id: string): Promise<void> {
-    const existing = await this.prisma.categoryRule.findFirst({
-      where: { id, userId },
-      select: { id: true },
-    });
+    const existing = await this.categories.findOwnedRule(userId, id);
 
     if (!existing) {
       throw new NotFoundException('Không tìm thấy rule');
     }
 
-    await this.prisma.categoryRule.delete({ where: { id } });
+    await this.categories.deleteRule(id);
   }
 
   /**
@@ -227,13 +150,19 @@ export class CategoriesService {
    * trỏ vào category của user B.
    */
   private async assertOwnsCategory(userId: string, categoryId: string): Promise<void> {
-    const category = await this.prisma.category.findFirst({
-      where: { id: categoryId, userId },
-      select: { id: true },
-    });
+    const category = await this.categories.findOwned(userId, categoryId);
 
     if (!category) {
       throw new NotFoundException('Không tìm thấy danh mục');
     }
   }
+}
+
+function toRuleDto(row: RuleRow): CategoryRuleDto {
+  return {
+    id: row.id,
+    keyword: row.keyword,
+    priority: row.priority,
+    category: toCategorySummary(row.category)!,
+  };
 }

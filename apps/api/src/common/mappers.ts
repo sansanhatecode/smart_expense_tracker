@@ -19,6 +19,17 @@ export function toDateOnly(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+/**
+ * 'YYYY-MM-DD' → Date ở UTC midnight, chiều ngược của `toDateOnly`.
+ *
+ * Chỉ repository dùng: đây là bước đổi ngày lịch sang cách Prisma biểu diễn cột
+ * DATE, không phải logic nghiệp vụ. Ép UTC để ngày lưu xuống không lệch theo
+ * múi giờ của máy chạy API.
+ */
+export function fromDateOnly(date: string): Date {
+  return new Date(`${date}T00:00:00.000Z`);
+}
+
 export function toMoney(value: bigint): number {
   return bigintToNumber(value);
 }

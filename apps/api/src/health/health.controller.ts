@@ -1,11 +1,11 @@
 import { Controller, Get } from '@nestjs/common';
 import { Public } from '../auth/jwt-auth.guard';
-import { PrismaService } from '../prisma/prisma.service';
+import { HealthRepository } from './health.repository';
 
 @Public()
 @Controller('health')
 export class HealthController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly health: HealthRepository) {}
 
   /**
    * Health check có chạm DB thật.
@@ -15,7 +15,7 @@ export class HealthController {
    */
   @Get()
   async check(): Promise<{ status: string; database: string; uptime: number }> {
-    await this.prisma.$queryRaw`SELECT 1`;
+    await this.health.ping();
     return {
       status: 'ok',
       database: 'ok',

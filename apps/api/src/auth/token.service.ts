@@ -2,7 +2,7 @@ import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { env } from '../config/env';
-import { PrismaService } from '../prisma/prisma.service';
+import { TokenRepository } from './token.repository';
 
 export interface AccessTokenPayload {
   /** userId */
@@ -48,7 +48,7 @@ export class TokenService {
   private readonly logger = new Logger(TokenService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly tokens: TokenRepository,
     private readonly jwt: JwtService,
   ) {}
 
@@ -90,15 +90,13 @@ export class TokenService {
   ): Promise<IssuedTokens> {
     const rawToken = this.generateRawToken();
 
-    await this.prisma.refreshToken.create({
-      data: {
-        userId,
-        tokenHash: this.hashToken(rawToken),
-        familyId: randomUUID(),
-        expiresAt: this.refreshExpiry(),
-        userAgent: context.userAgent ?? null,
-        ip: context.ip ?? null,
-      },
+    await this.tokens.create({
+      userId,
+      tokenHash: this.hashToken(rawToken),
+      familyId: randomUUID(),
+      expiresAt: this.refreshExpiry(),
+      userAgent: context.userAgent ?? null,
+      ip: context.ip ?? null,
     });
 
     const { accessToken, expiresIn } = await this.signAccessToken(userId, email);
@@ -113,12 +111,7 @@ export class TokenService {
    * revoke", vì đó là thông tin có ích cho kẻ đang thăm dò.
    */
   async rotate(rawToken: string, context: TokenContext): Promise<RotatedTokens> {
-    const tokenHash = this.hashToken(rawToken);
-
-    const existing = await this.prisma.refreshToken.findUnique({
-      where: { tokenHash },
-      include: { user: { select: { id: true, email: true, name: true } } },
-    });
+    const existing = await this.tokens.findByHash(this.hashToken(rawToken));
 
     if (!existing) {
       throw new UnauthorizedException('Phiên đăng nhập không hợp lệ');
@@ -130,7 +123,7 @@ export class TokenService {
         `Phát hiện dùng lại refresh token đã revoke (user ${existing.userId}, ` +
           `family ${existing.familyId}) — revoke toàn bộ family`,
       );
-      await this.revokeFamily(existing.familyId);
+      await this.tokens.revokeFamily(existing.familyId);
       throw new UnauthorizedException('Phiên đăng nhập không hợp lệ');
     }
 
@@ -140,24 +133,13 @@ export class TokenService {
 
     const rawNext = this.generateRawToken();
 
-    // Rotation phải nguyên tử: nếu tạo được token mới mà không revoke được token
-    // cũ thì hai token cùng sống, và reuse detection mất tác dụng.
-    await this.prisma.$transaction(async (tx) => {
-      const next = await tx.refreshToken.create({
-        data: {
-          userId: existing.userId,
-          tokenHash: this.hashToken(rawNext),
-          familyId: existing.familyId,
-          expiresAt: this.refreshExpiry(),
-          userAgent: context.userAgent ?? null,
-          ip: context.ip ?? null,
-        },
-      });
-
-      await tx.refreshToken.update({
-        where: { id: existing.id },
-        data: { revokedAt: new Date(), replacedById: next.id },
-      });
+    await this.tokens.rotate(existing.id, {
+      userId: existing.userId,
+      tokenHash: this.hashToken(rawNext),
+      familyId: existing.familyId,
+      expiresAt: this.refreshExpiry(),
+      userAgent: context.userAgent ?? null,
+      ip: context.ip ?? null,
     });
 
     const { accessToken, expiresIn } = await this.signAccessToken(
@@ -169,29 +151,20 @@ export class TokenService {
   }
 
   async revokeFamily(familyId: string): Promise<void> {
-    await this.prisma.refreshToken.updateMany({
-      where: { familyId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await this.tokens.revokeFamily(familyId);
   }
 
   /** Logout: revoke cả family, không chỉ token hiện tại. */
   async revokeByRawToken(rawToken: string): Promise<void> {
-    const existing = await this.prisma.refreshToken.findUnique({
-      where: { tokenHash: this.hashToken(rawToken) },
-      select: { familyId: true },
-    });
+    const existing = await this.tokens.findFamilyByHash(this.hashToken(rawToken));
 
     if (existing) {
-      await this.revokeFamily(existing.familyId);
+      await this.tokens.revokeFamily(existing.familyId);
     }
   }
 
   async revokeAllForUser(userId: string): Promise<void> {
-    await this.prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await this.tokens.revokeAllForUser(userId);
   }
 
   /**
@@ -200,13 +173,8 @@ export class TokenService {
    * ngay thì token bị đánh cắp lại thành "không tồn tại" thay vì "đã revoke",
    * và ta mất tín hiệu để revoke cả family.
    */
-  async cleanupExpired(): Promise<number> {
+  cleanupExpired(): Promise<number> {
     const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const result = await this.prisma.refreshToken.deleteMany({
-      where: {
-        OR: [{ expiresAt: { lt: cutoff } }, { revokedAt: { lt: cutoff } }],
-      },
-    });
-    return result.count;
+    return this.tokens.deleteExpiredBefore(cutoff);
   }
 }

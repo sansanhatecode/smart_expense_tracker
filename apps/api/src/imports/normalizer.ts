@@ -1,7 +1,12 @@
 import { MAX_TRANSACTION_VND } from '@expense/shared';
 import { normalizeDescription } from './dedupe';
 import { extractMcc } from './mcc';
-import { isCardBillPayment, isSelfTransfer, isWalletTopup } from './parse-value';
+import {
+  isCardBillPayment,
+  isSavingsPocketTransfer,
+  isSelfTransfer,
+  isWalletTopup,
+} from './parse-value';
 import type { AccountKind, InternalKind } from '../generated/prisma/enums';
 import type { BankProfile, NormalizedTransaction, RawTransaction, SkippedRow } from './types';
 
@@ -76,10 +81,13 @@ export function normalize(
  * Dòng này là tiền dịch chuyển giữa các nguồn của chính người dùng, hay là chi
  * tiêu/thu nhập thật?
  *
- * Mỗi luật đòi đủ BA điều kiện — mô tả, chiều tiền, loại nguồn — chứ không chỉ
- * mô tả. Chiều tiền là thứ phân biệt hai mặt của cùng một giao dịch, và loại
+ * Phần lớn luật đòi đủ BA điều kiện — mô tả, chiều tiền, loại nguồn — chứ không
+ * chỉ mô tả. Chiều tiền là thứ phân biệt hai mặt của cùng một giao dịch, và loại
  * nguồn là thứ cho biết mặt nào hợp lý ở file nào. Chỉ khớp chuỗi thì một khoản
  * "nạp tiền" nhận được từ người khác cũng thành nội bộ.
+ *
+ * Ngoại lệ là túi tiết kiệm: mô tả đã nói rõ tiền đi đâu nên chiều tiền không
+ * tham gia. Xem `isSavingsPocketTransfer`.
  *
  * Cả hai vế của một lần chuyển đều được đánh dấu, độc lập với nhau. Không có
  * bước ghép đôi hai vế: matching theo số tiền và ngày rất mong manh, mà để loại
@@ -101,6 +109,10 @@ function classifyInternal(
     if (accountKind === 'credit_card' ? moneyIn : !moneyIn) return 'card_payment';
     return null;
   }
+
+  // PHẢI đứng trước luật nạp ví: 'Nạp tiền vào Túi Thần Tài' khớp cả hai, và
+  // luật nạp ví sẽ loại vế tiền RA khỏi ví vì nó đòi chiều tiền phải là VÀO.
+  if (isSavingsPocketTransfer(description)) return 'self_transfer';
 
   if (isWalletTopup(description)) {
     // Tiền rời ngân hàng để vào ví, hoặc tiền vào ví đến từ ngân hàng.

@@ -225,6 +225,82 @@ describe('phân loại khoản nội bộ', () => {
     expect(rows[1]?.internalKind).toBeNull();
   });
 
+  it('cất tiền vào Túi Thần Tài: CẢ HAI vế đều là nội bộ', async () => {
+    // Dựng theo sao kê MoMo thật. Điểm mấu chốt: hai vế mang ĐÚNG một mô tả, chỉ
+    // khác dấu, vì file phủ cả ví lẫn túi. Luật nạp ví đòi tiền phải VÀO ví nên
+    // nó chỉ bắt được vế +1tr, còn vế −1tr thành một khoản chi thật không có —
+    // tổng chi phồng lên đúng bằng số tiền vừa cất đi.
+    const momo = findProfile('momo');
+    if (!momo) throw new Error('thiếu profile momo');
+
+    const { rows } = await run(
+      [
+        'Thời gian,Loại Giao Dịch,Số Tiền,Trạng Thái GD',
+        '06/01/2026 09:00:00,Nạp tiền vào Túi Thần Tài,-1.000.000,Thành công',
+        '06/01/2026 09:00:01,Nạp tiền vào Túi Thần Tài,1.000.000,Thành công',
+      ].join('\n'),
+      momo,
+    );
+
+    expect(rows[0]).toMatchObject({ type: 'expense', internalKind: 'self_transfer' });
+    expect(rows[1]).toMatchObject({ type: 'income', internalKind: 'self_transfer' });
+    // Cất tiền vào túi không làm chi tiêu tăng lên đồng nào
+    expect(realExpense(rows)).toBe(0n);
+  });
+
+  it('LÃI Túi Thần Tài là thu nhập thật, không bị loại', async () => {
+    // Đây là khoản duy nhất liên quan tới cái túi mà tiền thật sự sinh ra. Loại
+    // nó đi là ăn bớt thu nhập của người dùng.
+    const momo = findProfile('momo');
+    if (!momo) throw new Error('thiếu profile momo');
+
+    const { rows } = await run(
+      [
+        'Thời gian,Loại Giao Dịch,Số Tiền,Trạng Thái GD',
+        '06/01/2026 09:00:00,Nhận lãi Túi Thần Tài ngày 06/01/2026,4.521,Thành công',
+        '07/01/2026 09:00:00,Nhận tiền lãi Túi Thần Tài,3.180,Thành công',
+      ].join('\n'),
+      momo,
+    );
+
+    expect(rows[0]).toMatchObject({ type: 'income', internalKind: null });
+    // Cách viết thứ hai có cả tên túi lẫn 'nhận tiền' — điều kiện tên túi + động
+    // từ chuyển tiền không đủ để chặn nó, phải có luật loại trừ tiền lãi.
+    expect(rows[1]).toMatchObject({ type: 'income', internalKind: null });
+  });
+
+  it('nạp tiền điện thoại KHÔNG bị luật túi tiết kiệm nuốt theo', async () => {
+    // Cũng là tiền RA khỏi ví và cũng có chữ 'nạp tiền', nhưng không có tên túi.
+    const momo = findProfile('momo');
+    if (!momo) throw new Error('thiếu profile momo');
+
+    const { rows } = await run(
+      [
+        'Thời gian,Loại Giao Dịch,Số Tiền,Trạng Thái GD',
+        '06/01/2026 09:00:00,Nạp tiền điện thoại Viettel,-100.000,Thành công',
+      ].join('\n'),
+      momo,
+    );
+
+    expect(rows[0]).toMatchObject({ type: 'expense', internalKind: null });
+  });
+
+  it('rút tiền khỏi Túi Thần Tài cũng là nội bộ, cả hai vế', async () => {
+    const momo = findProfile('momo');
+    if (!momo) throw new Error('thiếu profile momo');
+
+    const { rows } = await run(
+      [
+        'Thời gian,Loại Giao Dịch,Số Tiền,Trạng Thái GD',
+        '10/01/2026 09:00:00,Rút tiền từ Túi Thần Tài,-1.000.000,Thành công',
+        '10/01/2026 09:00:01,Nhận tiền từ ví vào Túi Thần Tài,1.000.000,Thành công',
+      ].join('\n'),
+      momo,
+    );
+
+    expect(rows.every((row) => row.internalKind === 'self_transfer')).toBe(true);
+  });
+
   it('rút tiền ATM vẫn là chi tiêu thật', async () => {
     // Không có tài khoản tiền mặt để tiền chảy vào, nên đánh dấu nội bộ sẽ làm
     // khoản này biến mất khỏi mọi thống kê.

@@ -312,6 +312,44 @@ export function isSelfTransfer(raw: string | null | undefined): boolean {
   return matchesAny(raw, SELF_TRANSFER_MARKERS);
 }
 
+/**
+ * Cất tiền vào / lấy tiền ra khỏi túi tiết kiệm trong ví điện tử.
+ *
+ * MoMo gọi túi này là "Túi Thần Tài". Nó là một ngăn khác của cùng cái ví, nên
+ * chuyển tiền vào đó không phải chi tiêu — tiền vẫn của người dùng.
+ *
+ * Vì sao cần luật riêng thay vì để `isWalletTopup` lo: sao kê MoMo ghi CẢ HAI vế
+ * của một lần cất tiền, và cả hai đều mang đúng một mô tả "Nạp tiền vào Túi Thần
+ * Tài" — một dòng −1.000.000 (rời ví) và một dòng +1.000.000 (vào túi). Luật
+ * `wallet_topup` đòi tiền phải VÀO ví, nên nó chỉ bắt được vế thứ hai, và vế đầu
+ * thành một khoản chi thật không có. Ở đây chiều tiền không tham gia: tên cái
+ * túi đã nói rõ tiền đi đâu, và cả hai chiều đều là nội bộ.
+ *
+ * Ba điều kiện chứ không phải một, vì hai cái bẫy nằm sát nhau:
+ *
+ *   Phải có tên túi. Bỏ điều kiện này thì 'Nạp tiền điện thoại Viettel' —
+ *   khoản chi thật, cũng là tiền RA khỏi ví — bị loại theo.
+ *
+ *   Phải có động từ chuyển tiền. Chặn 'Nhận lãi Túi Thần Tài' ngay từ đây.
+ *
+ *   Và phải KHÔNG phải tiền lãi. Điều kiện thứ hai không đủ vì lãi có thể được
+ *   ghi là 'Nhận tiền lãi Túi Thần Tài' — có cả tên túi lẫn 'nhận tiền'. Tiền
+ *   lãi là thu nhập THẬT, loại nó đi là ăn bớt thu nhập của người dùng.
+ */
+const SAVINGS_POCKET_MARKERS = ['tuithantai'];
+
+const POCKET_MOVEMENT_MARKERS = ['naptien', 'ruttien', 'chuyentien', 'nhantien'];
+
+/** Lãi và phần sinh lời của túi — thu nhập thật, không phải tiền đổi chỗ. */
+const POCKET_EARNING_MARKERS = ['lai', 'sinhloi'];
+
+export function isSavingsPocketTransfer(raw: string | null | undefined): boolean {
+  if (!matchesAny(raw, SAVINGS_POCKET_MARKERS)) return false;
+  if (matchesAny(raw, POCKET_EARNING_MARKERS)) return false;
+
+  return matchesAny(raw, POCKET_MOVEMENT_MARKERS);
+}
+
 function matchesAny(raw: string | null | undefined, markers: string[]): boolean {
   if (raw === null || raw === undefined) return false;
 

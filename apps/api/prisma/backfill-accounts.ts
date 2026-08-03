@@ -36,7 +36,12 @@ import { config as loadEnv } from 'dotenv';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { defaultAccountName } from '../src/imports/account-detect';
 import { findProfile } from '../src/imports/bank-profiles';
-import { isCardBillPayment, isSelfTransfer, isWalletTopup } from '../src/imports/parse-value';
+import {
+  isCardBillPayment,
+  isSavingsPocketTransfer,
+  isSelfTransfer,
+  isWalletTopup,
+} from '../src/imports/parse-value';
 import { extractMcc } from '../src/imports/mcc';
 import { normalizeDescription } from '../src/imports/dedupe';
 import { PrismaClient } from '../src/generated/prisma/client';
@@ -124,6 +129,9 @@ function classifyInternal(
     if (accountKind === 'credit_card' ? moneyIn : !moneyIn) return 'card_payment';
     return null;
   }
+
+  // Phải đứng trước luật nạp ví, cùng lý do như trong normalizer.
+  if (isSavingsPocketTransfer(description)) return 'self_transfer';
 
   if (isWalletTopup(description)) {
     if (accountKind === 'wallet' ? moneyIn : !moneyIn) return 'wallet_topup';

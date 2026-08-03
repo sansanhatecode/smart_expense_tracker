@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isCardBillPayment,
   isFailedStatus,
+  isSavingsPocketTransfer,
   isSelfTransfer,
   isWalletTopup,
   normalizeHeader,
@@ -297,6 +298,47 @@ describe('isWalletTopup', () => {
     expect(isWalletTopup('')).toBe(false);
     expect(isWalletTopup(null)).toBe(false);
     expect(isWalletTopup(undefined)).toBe(false);
+  });
+});
+
+describe('isSavingsPocketTransfer', () => {
+  it('nhận mọi chiều của việc cất/lấy tiền khỏi túi', () => {
+    for (const text of [
+      'Nạp tiền vào Túi Thần Tài',
+      'Nhận tiền từ ví vào Túi Thần Tài',
+      'Rút tiền từ Túi Thần Tài',
+      'Chuyển tiền vào Túi Thần Tài',
+    ]) {
+      expect(isSavingsPocketTransfer(text), text).toBe(true);
+    }
+  });
+
+  it('KHÔNG nhận tiền lãi của túi — đó là thu nhập thật', () => {
+    for (const text of [
+      'Nhận lãi Túi Thần Tài ngày 06/01/2026',
+      'Nhận tiền lãi Túi Thần Tài',
+      'Lãi suất Túi Thần Tài',
+      'Sinh lời Túi Thần Tài',
+    ]) {
+      expect(isSavingsPocketTransfer(text), text).toBe(false);
+    }
+  });
+
+  it('KHÔNG nhận khoản chi thật chỉ vì có chữ "nạp tiền"', () => {
+    // Cùng là tiền ra khỏi ví, cùng có 'nạp tiền', nhưng không có tên túi.
+    for (const text of [
+      'Nạp tiền điện thoại Viettel',
+      'Nạp tiền vào ví ZaloPay',
+      'Nạp thẻ game',
+    ]) {
+      expect(isSavingsPocketTransfer(text), text).toBe(false);
+    }
+  });
+
+  it('có tên túi nhưng không phải chuyển tiền thì không nhận', () => {
+    expect(isSavingsPocketTransfer('Mở Túi Thần Tài')).toBe(false);
+    expect(isSavingsPocketTransfer('')).toBe(false);
+    expect(isSavingsPocketTransfer(null)).toBe(false);
   });
 });
 

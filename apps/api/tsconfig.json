@@ -1,8 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "commonjs",
-    "moduleResolution": "node",
+    // node20 thay cho commonjs + moduleResolution "node" (alias của node10, TS 7 xoá hẳn).
+    // Vẫn emit CommonJS vì package.json không có "type": "module" — Nest chạy như cũ.
+    "module": "node20",
+    "moduleResolution": "node16",
     "lib": ["ES2022"],
     "outDir": "./dist",
     "rootDir": "./src",

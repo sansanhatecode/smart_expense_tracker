@@ -248,6 +248,25 @@ describe('phân loại khoản nội bộ', () => {
     expect(realExpense(rows)).toBe(0n);
   });
 
+  it('tên túi ở CỘT KHÁC cột mô tả vẫn được nhận ra', async () => {
+    // Khi nhận chuyển khoản từ ngân hàng vào túi, cột "Loại Giao Dịch" chỉ ghi
+    // 'Nhận tiền chuyển khoản' — tên túi nằm ở cột nguồn/đích. Parser chỉ chọn
+    // MỘT cột làm mô tả, nên luật soi cả dòng mới thấy được.
+    const momo = findProfile('momo');
+    if (!momo) throw new Error('thiếu profile momo');
+
+    const { rows } = await run(
+      [
+        'Thời gian,Loại Giao Dịch,Nguồn tiền,Số Tiền,Trạng Thái GD',
+        '12/01/2026 09:00:00,Nhận tiền chuyển khoản,Túi Thần Tài,2.000.000,Thành công',
+      ].join('\n'),
+      momo,
+    );
+
+    expect(rows[0]?.description).toBe('Nhận tiền chuyển khoản');
+    expect(rows[0]).toMatchObject({ type: 'income', internalKind: 'self_transfer' });
+  });
+
   it('LÃI Túi Thần Tài là thu nhập thật, không bị loại', async () => {
     // Đây là khoản duy nhất liên quan tới cái túi mà tiền thật sự sinh ra. Loại
     // nó đi là ăn bớt thu nhập của người dùng.
@@ -267,6 +286,25 @@ describe('phân loại khoản nội bộ', () => {
     // Cách viết thứ hai có cả tên túi lẫn 'nhận tiền' — điều kiện tên túi + động
     // từ chuyển tiền không đủ để chặn nó, phải có luật loại trừ tiền lãi.
     expect(rows[1]).toMatchObject({ type: 'income', internalKind: null });
+  });
+
+  it('mã hệ thống momo_interest chặn được lãi dù mô tả không nói "lãi"', async () => {
+    // Ca khó nhất: mô tả trông y như một lần cất tiền vào túi, chỉ cột mã hệ
+    // thống nói đây là tiền lãi. Soi cả dòng khiến `interest` bắt được nó — nếu
+    // không thì lãi bị xếp nội bộ và thu nhập của người dùng bị ăn bớt.
+    const momo = findProfile('momo');
+    if (!momo) throw new Error('thiếu profile momo');
+
+    const { rows } = await run(
+      [
+        'Thời gian,Loại Giao Dịch,Mã hệ thống,Số Tiền,Trạng Thái GD',
+        '07/01/2026 07:30:00,Nhận tiền vào Túi Thần Tài,momo_interest,4.521,Thành công',
+      ].join('\n'),
+      momo,
+    );
+
+    expect(rows[0]?.description).toBe('Nhận tiền vào Túi Thần Tài');
+    expect(rows[0]).toMatchObject({ type: 'income', internalKind: null });
   });
 
   it('nạp tiền điện thoại KHÔNG bị luật túi tiết kiệm nuốt theo', async () => {

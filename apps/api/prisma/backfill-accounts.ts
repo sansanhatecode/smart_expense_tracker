@@ -117,6 +117,12 @@ function bankNameOf(bankProfile: string | null): string {
 /**
  * Cùng luật với `classifyInternal` trong normalizer, nhưng đọc `type` của DB
  * thay vì dấu của `amount` — ở đây `amount` luôn dương, chiều nằm ở `type`.
+ *
+ * YẾU HƠN một điểm không sửa được: luật túi tiết kiệm ở normalizer soi cả dòng
+ * gốc, còn ở đây chỉ có `description`. `Transaction` không lưu dòng gốc (chỉ
+ * `StagedTransaction` có `rawLine`, và nó bị xoá lúc confirm). Nên dòng nào có
+ * tên túi ở cột khác cột mô tả thì script này KHÔNG nhận ra — muốn sửa đúng thì
+ * rollback lần import đó rồi import lại.
  */
 function classifyInternal(
   description: string,

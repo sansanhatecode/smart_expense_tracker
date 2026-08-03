@@ -68,7 +68,7 @@ export function normalize(
       // rút ở ĐÂY chứ không ở parser vì tới bước này mô tả đã được chuẩn hoá,
       // nên 'MCC: 5812' và '(mcc-5812)' về cùng một dạng để một regex lo hết.
       mcc: row.mcc ?? extractMcc(normalizedDescription),
-      internalKind: classifyInternal(row.description, row.amount, accountKind),
+      internalKind: classifyInternal(row.description, row.raw, row.amount, accountKind),
       raw: row.raw,
       rowIndex: row.rowIndex,
     });
@@ -86,8 +86,8 @@ export function normalize(
  * nguồn là thứ cho biết mặt nào hợp lý ở file nào. Chỉ khớp chuỗi thì một khoản
  * "nạp tiền" nhận được từ người khác cũng thành nội bộ.
  *
- * Ngoại lệ là túi tiết kiệm: mô tả đã nói rõ tiền đi đâu nên chiều tiền không
- * tham gia. Xem `isSavingsPocketTransfer`.
+ * Ngoại lệ là túi tiết kiệm: nó bỏ qua chiều tiền và soi CẢ DÒNG thay vì chỉ cột
+ * mô tả — xem `isSavingsPocketTransfer` để biết vì sao chỉ luật đó được phép.
  *
  * Cả hai vế của một lần chuyển đều được đánh dấu, độc lập với nhau. Không có
  * bước ghép đôi hai vế: matching theo số tiền và ngày rất mong manh, mà để loại
@@ -97,6 +97,8 @@ export function normalize(
  */
 function classifyInternal(
   description: string,
+  /** Cả dòng gốc, mọi ô ghép lại. Chỉ luật túi tiết kiệm dùng tới. */
+  rawLine: string,
   amount: bigint,
   accountKind: AccountKind,
 ): InternalKind | null {
@@ -112,7 +114,7 @@ function classifyInternal(
 
   // PHẢI đứng trước luật nạp ví: 'Nạp tiền vào Túi Thần Tài' khớp cả hai, và
   // luật nạp ví sẽ loại vế tiền RA khỏi ví vì nó đòi chiều tiền phải là VÀO.
-  if (isSavingsPocketTransfer(description)) return 'self_transfer';
+  if (isSavingsPocketTransfer(rawLine)) return 'self_transfer';
 
   if (isWalletTopup(description)) {
     // Tiền rời ngân hàng để vào ví, hoặc tiền vào ví đến từ ngân hàng.

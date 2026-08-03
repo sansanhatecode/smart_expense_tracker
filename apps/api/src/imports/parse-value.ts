@@ -325,14 +325,28 @@ export function isSelfTransfer(raw: string | null | undefined): boolean {
  * thành một khoản chi thật không có. Ở đây chiều tiền không tham gia: tên cái
  * túi đã nói rõ tiền đi đâu, và cả hai chiều đều là nội bộ.
  *
+ * ─── Soi CẢ DÒNG, không chỉ cột mô tả ───
+ *
+ * Đây là luật DUY NHẤT làm vậy, và có lý do: sao kê MoMo có nhiều cột chữ, tên
+ * túi xuất hiện ở cột nào là tuỳ loại giao dịch. Khi nhận chuyển khoản từ ngân
+ * hàng vào túi, cột "Loại Giao Dịch" chỉ ghi 'Nhận tiền chuyển khoản' còn tên
+ * túi nằm ở cột nguồn/đích — mà parser chỉ chọn MỘT cột làm mô tả. Việc MoMo đặt
+ * tên túi vào cột nào không nên đổi kết quả.
+ *
+ * Các luật khác cố tình KHÔNG soi cả dòng: 'thanh toán sao kê' hay 'nạp tiền' là
+ * cụm chung, gặp phải ở cột tên đối tác hay cột ghi chú thì khớp nhầm. Còn "Túi
+ * Thần Tài" là tên riêng của một sản phẩm, xuất hiện ở đâu trong dòng cũng chỉ
+ * có một nghĩa.
+ *
  * Ba điều kiện chứ không phải một, vì hai cái bẫy nằm sát nhau:
  *
  *   Phải có tên túi. Bỏ điều kiện này thì 'Nạp tiền điện thoại Viettel' —
  *   khoản chi thật, cũng là tiền RA khỏi ví — bị loại theo.
  *
- *   Phải có động từ chuyển tiền. Chặn 'Nhận lãi Túi Thần Tài' ngay từ đây.
+ *   Phải có động từ chuyển tiền, để một dòng chỉ nhắc tên túi (mở túi, đóng túi)
+ *   không bị coi là chuyển tiền.
  *
- *   Và phải KHÔNG phải tiền lãi. Điều kiện thứ hai không đủ vì lãi có thể được
+ *   Và phải KHÔNG phải tiền lãi. Hai điều kiện trên không đủ vì lãi có thể được
  *   ghi là 'Nhận tiền lãi Túi Thần Tài' — có cả tên túi lẫn 'nhận tiền'. Tiền
  *   lãi là thu nhập THẬT, loại nó đi là ăn bớt thu nhập của người dùng.
  */
@@ -340,8 +354,14 @@ const SAVINGS_POCKET_MARKERS = ['tuithantai'];
 
 const POCKET_MOVEMENT_MARKERS = ['naptien', 'ruttien', 'chuyentien', 'nhantien'];
 
-/** Lãi và phần sinh lời của túi — thu nhập thật, không phải tiền đổi chỗ. */
-const POCKET_EARNING_MARKERS = ['lai', 'sinhloi'];
+/**
+ * Lãi và phần sinh lời của túi — thu nhập thật, không phải tiền đổi chỗ.
+ *
+ * `interest` có ở đây vì luật này soi CẢ DÒNG: sao kê MoMo có cột mã hệ thống và
+ * dòng trả lãi mang `momo_interest`. Đó là tín hiệu chắc hơn chữ 'lãi' trong mô
+ * tả, vì mã hệ thống không đổi theo cách MoMo viết lại câu tiếng Việt.
+ */
+const POCKET_EARNING_MARKERS = ['lai', 'sinhloi', 'interest'];
 
 export function isSavingsPocketTransfer(raw: string | null | undefined): boolean {
   if (!matchesAny(raw, SAVINGS_POCKET_MARKERS)) return false;

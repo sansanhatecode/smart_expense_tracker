@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   isCardBillPayment,
   isFailedStatus,
+  isSelfTransfer,
+  isWalletTopup,
   normalizeHeader,
   parseStatementAmount,
   parseStatementDate,
@@ -264,5 +266,60 @@ describe('isCardBillPayment', () => {
     expect(isCardBillPayment('   ')).toBe(false);
     expect(isCardBillPayment(null)).toBe(false);
     expect(isCardBillPayment(undefined)).toBe(false);
+  });
+});
+
+describe('isWalletTopup', () => {
+  it('nhận các cách gọi việc nạp ví', () => {
+    for (const text of [
+      'NAP TIEN VI MOMO',
+      'Nạp tiền vào ví ZaloPay',
+      'Nap vi dien tu',
+      'TOPUP WALLET',
+    ]) {
+      expect(isWalletTopup(text), text).toBe(true);
+    }
+  });
+
+  it('KHÔNG nhận khoản chi tiêu qua ví', () => {
+    // Tên ví có mặt trong mô tả của mọi khoản thanh toán qua ví. Khớp trên tên
+    // ví trần sẽ nuốt sạch chi tiêu thật của người dùng.
+    for (const text of [
+      'MOMO Highlands Coffee',
+      'Thanh toan ZaloPay Shopee',
+      'VNPAY QR Circle K',
+    ]) {
+      expect(isWalletTopup(text), text).toBe(false);
+    }
+  });
+
+  it('ô trống không suy diễn', () => {
+    expect(isWalletTopup('')).toBe(false);
+    expect(isWalletTopup(null)).toBe(false);
+    expect(isWalletTopup(undefined)).toBe(false);
+  });
+});
+
+describe('isSelfTransfer', () => {
+  it('nhận cách viết nói rõ là nội bộ', () => {
+    for (const text of [
+      'CHUYEN KHOAN NOI BO',
+      'Chuyển tiền giữa các tài khoản',
+      'INTERNAL TRANSFER',
+    ]) {
+      expect(isSelfTransfer(text), text).toBe(true);
+    }
+  });
+
+  it('KHÔNG nhận chuyển tiền thường', () => {
+    // Phần lớn khoản chuyển tiền là trả cho người khác, tức chi tiêu thật. Đoán
+    // từ 'chuyen tien' trần sẽ giấu mất phần lớn chi tiêu của người dùng.
+    for (const text of [
+      'CHUYEN TIEN CHO NGUYEN VAN A',
+      'Chuyen khoan tra tien nha thang 07',
+      'CK den NGUYEN THI B',
+    ]) {
+      expect(isSelfTransfer(text), text).toBe(false);
+    }
   });
 });

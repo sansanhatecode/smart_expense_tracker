@@ -272,14 +272,51 @@ const CARD_BILL_PAYMENT_MARKERS = [
  * hai túi của cùng một người, không phải thu nhập và cũng không phải chi tiêu.
  * Số tiền thật đã được ghi nhận rồi, ở chính các dòng mua hàng phía trên nó.
  *
- * Hàm này CHỈ trả lời về chuỗi mô tả. Việc có bỏ dòng hay không còn phụ thuộc
- * chiều tiền, và chỗ quyết định là table-parser — xem chú thích ở đó.
+ * Hàm này CHỈ trả lời về chuỗi mô tả. Dòng này là nội bộ hay không còn phụ thuộc
+ * chiều tiền và loại nguồn tiền, và chỗ quyết định là normalizer — xem
+ * `classifyInternal` ở đó.
  */
 export function isCardBillPayment(raw: string | null | undefined): boolean {
+  return matchesAny(raw, CARD_BILL_PAYMENT_MARKERS);
+}
+
+/**
+ * Cách gọi việc nạp tiền vào ví điện tử.
+ *
+ * Ngắn và cụ thể vì cùng lý do với danh sách trên. KHÔNG có 'momo' hay
+ * 'zalopay' trần: tên ví xuất hiện trong mô tả của mọi khoản THANH TOÁN qua ví
+ * ('MOMO Highlands Coffee'), tức đúng những khoản chi thật phải giữ lại.
+ */
+const WALLET_TOPUP_MARKERS = ['naptienvi', 'naptienvao', 'napvi', 'naptien', 'topup', 'topupwallet'];
+
+export function isWalletTopup(raw: string | null | undefined): boolean {
+  return matchesAny(raw, WALLET_TOPUP_MARKERS);
+}
+
+/**
+ * Chuyển tiền giữa hai tài khoản của chính người dùng.
+ *
+ * Chỉ nhận những cách viết nói RÕ là nội bộ. Cố tình không đoán từ 'chuyentien'
+ * trần — phần lớn khoản chuyển tiền là trả cho người khác, tức chi tiêu thật.
+ */
+const SELF_TRANSFER_MARKERS = [
+  'chuyenkhoannoibo',
+  'chuyentiennoibo',
+  'chuyentiengiuataikhoan',
+  'chuyentiengiuacactaikhoan',
+  'internaltransfer',
+  'ownaccounttransfer',
+];
+
+export function isSelfTransfer(raw: string | null | undefined): boolean {
+  return matchesAny(raw, SELF_TRANSFER_MARKERS);
+}
+
+function matchesAny(raw: string | null | undefined, markers: string[]): boolean {
   if (raw === null || raw === undefined) return false;
 
   const text = compact(String(raw));
   if (text === '') return false;
 
-  return CARD_BILL_PAYMENT_MARKERS.some((marker) => text.includes(marker));
+  return markers.some((marker) => text.includes(marker));
 }

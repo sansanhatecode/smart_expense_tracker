@@ -1,6 +1,5 @@
 import { parseMcc } from './mcc';
 import {
-  isCardBillPayment,
   isFailedStatus,
   normalizeHeader,
   parseStatementAmount,
@@ -212,27 +211,20 @@ function parseRow(
   }
 
   /**
-   * Bỏ khoản trả nợ thẻ tín dụng — nhưng CHỈ khi nó là tiền vào.
+   * Khoản trả nợ thẻ tín dụng KHÔNG bị bỏ ở đây.
    *
-   * Chiều tiền là thứ phân biệt hai mặt của cùng một giao dịch, và bỏ nhầm mặt
-   * kia sẽ xoá mất tiền thật:
+   * Bản trước bỏ nó khi là tiền vào, để một khoản thu không có thật không lọt
+   * vào sao kê thẻ. Cách đó phải chọn giữa mất dữ liệu và đếm hai lần, vì cùng
+   * một khoản xuất hiện ở cả hai file với hai chiều ngược nhau.
    *
-   *   Sao kê THẺ — khoản này là tiền VÀO (ghi có, làm giảm dư nợ). Bỏ đi là
-   *   đúng: mọi đồng đã tiêu nằm ở các dòng mua hàng ngay phía trên trong cùng
-   *   file, giữ lại dòng này thì nó thành một khoản thu không có thật.
+   * Giờ không phải chọn nữa: cả hai vế đều được giữ và cùng đánh dấu
+   * `internalKind = card_payment` ở normalizer, nên không vế nào lọt vào thống
+   * kê thu/chi. Giữ lại còn là điều kiện cần để tính dư nợ thẻ — không có dòng
+   * ghi có trên thẻ thì dư nợ chỉ tăng, không bao giờ giảm.
    *
-   *   Sao kê TÀI KHOẢN THANH TOÁN — cũng khoản đó nhưng là tiền RA. Phải giữ:
-   *   nếu người dùng chỉ import sao kê ngân hàng mà không import sao kê thẻ thì
-   *   đây là dấu vết DUY NHẤT của số tiền đã tiêu bằng thẻ. Bỏ nó đi là làm chi
-   *   tiêu của họ bốc hơi.
+   * Quyết định nằm ở normalizer chứ không phải ở đây vì nó cần biết loại nguồn
+   * tiền, thứ chỉ suy ra được sau khi đã parse xong cả file.
    */
-  if (amount > 0n && isCardBillPayment(description)) {
-    return {
-      reason:
-        'Thanh toán sao kê thẻ tín dụng — tiền trả nợ thẻ, không phải thu nhập. ' +
-        'Các khoản đã tiêu nằm ở những dòng mua hàng trong cùng sao kê.',
-    };
-  }
 
   return {
     date,

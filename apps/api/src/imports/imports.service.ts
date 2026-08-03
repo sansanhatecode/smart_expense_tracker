@@ -17,6 +17,7 @@ import type {
   StagedRowDto,
   UpdateStagedRowInput,
 } from '@expense/shared';
+import { detectAccount } from './account-detect';
 import { AUTO_DETECT_CANDIDATES, findProfile } from './bank-profiles';
 import { categorize, type CategorizerRule, type MccRuleMap } from './categorizer';
 import { assignSequences, computeDedupeHash } from './dedupe';
@@ -89,7 +90,15 @@ export class ImportsService {
       );
     }
 
-    const { rows: normalized, skipped: normalizeSkipped } = normalize(result.rows, profile);
+    // Nguồn tiền suy ra từ dòng GỐC (còn dấu, còn cột MCC), trước khi normalize
+    // — và normalize cần biết kết quả để phân loại khoản nội bộ.
+    const detected = detectAccount(profile, result.rows);
+
+    const { rows: normalized, skipped: normalizeSkipped } = normalize(
+      result.rows,
+      profile,
+      detected.kind,
+    );
     const skipped = [...result.skipped, ...normalizeSkipped];
 
     // seq tính TRONG BATCH, không cộng số dòng đã có trong DB — cộng vào thì
@@ -120,12 +129,27 @@ export class ImportsService {
     void this.cleanupStalePendingBatches(userId);
 
     const batch = await this.prisma.$transaction(async (tx) => {
+      // upsert chứ không create: import cùng ngân hàng tháng sau phải rơi vào
+      // đúng account cũ. `update: {}` để không ghi đè tên người dùng đã sửa.
+      const account = await tx.account.upsert({
+        where: { userId_fingerprint: { userId, fingerprint: detected.fingerprint } },
+        create: {
+          userId,
+          fingerprint: detected.fingerprint,
+          name: detected.name,
+          kind: detected.kind,
+        },
+        update: {},
+        select: { id: true },
+      });
+
       const created = await tx.importBatch.create({
         data: {
           userId,
           source: parser.source,
           fileName: file.originalName,
           bankProfile: profile.id,
+          accountId: account.id,
           rowCount: hashed.length,
           status: 'pending',
         },
@@ -139,12 +163,14 @@ export class ImportsService {
             batchId: created.id,
             rowIndex: row.rowIndex,
             categoryId: categorize(row, rules, mccRules),
+            accountId: account.id,
             amount: row.amount,
             type: row.type,
             date: new Date(`${row.date}T00:00:00.000Z`),
             description: row.description,
             balance: row.balance,
             dedupeHash: row.dedupeHash,
+            internalKind: row.internalKind,
             duplicate: isDuplicate ? ('in_db' as const) : ('none' as const),
             // Dòng trùng mặc định BỎ TICK: mặc định an toàn là không thêm lại thứ
             // đã có. Người dùng vẫn tick lại được nếu biết mình đang làm gì.
@@ -272,12 +298,14 @@ export class ImportsService {
         select: {
           rowIndex: true,
           categoryId: true,
+          accountId: true,
           amount: true,
           type: true,
           date: true,
           description: true,
           balance: true,
           dedupeHash: true,
+          internalKind: true,
           selected: true,
         },
         orderBy: { rowIndex: 'asc' },
@@ -289,12 +317,14 @@ export class ImportsService {
         data: toInsert.map((row) => ({
           userId,
           categoryId: row.categoryId,
+          accountId: row.accountId,
           amount: row.amount,
           type: row.type,
           date: row.date,
           description: row.description,
           balance: row.balance,
           dedupeHash: row.dedupeHash,
+          internalKind: row.internalKind,
           importBatchId: batchId,
         })),
         // Chặn race: nếu cùng lúc có batch khác confirm dòng trùng hash thì bỏ

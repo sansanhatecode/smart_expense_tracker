@@ -1,5 +1,5 @@
 import type { ImportSource } from '@expense/shared';
-import type { TxType } from '../generated/prisma/enums';
+import type { InternalKind, TxType } from '../generated/prisma/enums';
 
 /**
  * Điều mà file sao kê cung cấp — `amount` CÓ DẤU, vì đó là dạng gốc.
@@ -34,6 +34,11 @@ export interface NormalizedTransaction {
   balance: bigint | null;
   /** MCC lấy từ cột riêng, hoặc rút từ mô tả nếu sao kê nhúng nó vào đó. */
   mcc: string | null;
+  /**
+   * Khác null = tiền dịch chuyển giữa các nguồn của chính người dùng, không
+   * phải chi tiêu/thu nhập thật. Xem `classifyInternal` trong normalizer.
+   */
+  internalKind: InternalKind | null;
   raw: string;
   rowIndex: number;
 }

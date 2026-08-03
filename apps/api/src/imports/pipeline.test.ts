@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { detectAccount } from './account-detect';
 import { AUTO_DETECT_CANDIDATES, findProfile, GENERIC_PROFILE } from './bank-profiles';
 import { DEFAULT_CATEGORIES } from '../categories/default-categories';
 import { categorize, categorizeAll, type CategorizerRule } from './categorizer';
@@ -255,7 +256,7 @@ describe('normalize', () => {
       ].join('\n'),
     );
 
-    const { rows } = normalize(parsed.rows, GENERIC_PROFILE);
+    const { rows } = normalize(parsed.rows, GENERIC_PROFILE, 'bank');
 
     expect(rows[0]?.amount).toBe(120_000n);
     expect(rows[0]?.type).toBe('expense');
@@ -267,7 +268,7 @@ describe('normalize', () => {
     const parsed = await parse(
       ['Ngày,Nội dung,Số tiền', '15/07/2026,A,-1', '16/07/2026,B,1'].join('\n'),
     );
-    const { rows } = normalize(parsed.rows, GENERIC_PROFILE);
+    const { rows } = normalize(parsed.rows, GENERIC_PROFILE, 'bank');
     expect(rows.every((r) => r.amount > 0n)).toBe(true);
   });
 
@@ -275,14 +276,14 @@ describe('normalize', () => {
     const parsed = await parse(
       ['Ngày,Nội dung,Số tiền', '15/07/2026,A,9.999.999.999.999.999'].join('\n'),
     );
-    const { rows, skipped } = normalize(parsed.rows, GENERIC_PROFILE);
+    const { rows, skipped } = normalize(parsed.rows, GENERIC_PROFILE, 'bank');
     expect(rows).toHaveLength(0);
     expect(skipped[0]?.reason).toContain('đọc sai cột');
   });
 
   it('gắn sẵn normalizedDescription cho dedupe và categorize dùng', async () => {
     const parsed = await parse(['Ngày,Nội dung,Số tiền', '15/07/2026,Cà phê Highlands,-50.000'].join('\n'));
-    const { rows } = normalize(parsed.rows, GENERIC_PROFILE);
+    const { rows } = normalize(parsed.rows, GENERIC_PROFILE, 'bank');
     expect(rows[0]?.normalizedDescription).toBe('CA PHE HIGHLANDS');
     // Mô tả gốc được giữ nguyên để hiển thị
     expect(rows[0]?.description).toBe('Cà phê Highlands');
@@ -535,7 +536,7 @@ describe('MCC đi qua cả đường parse → normalize', () => {
     expect(parsed.skipped).toEqual([]);
     expect(parsed.rows.map((row) => row.mcc)).toEqual(['5814', '4121', null]);
 
-    const { rows } = normalize(parsed.rows, GENERIC_PROFILE);
+    const { rows } = normalize(parsed.rows, GENERIC_PROFILE, 'bank');
     expect(rows.map((row) => row.mcc)).toEqual(['5814', '4121', null]);
   });
 
@@ -547,7 +548,7 @@ describe('MCC đi qua cả đường parse → normalize', () => {
     // Parser chỉ lo cột; mô tả là việc của normalizer, nơi đã có bản chuẩn hoá.
     expect(parsed.rows[0]?.mcc).toBeNull();
 
-    const { rows } = normalize(parsed.rows, GENERIC_PROFILE);
+    const { rows } = normalize(parsed.rows, GENERIC_PROFILE, 'bank');
     expect(rows[0]?.mcc).toBe('5812');
   });
 
@@ -556,7 +557,7 @@ describe('MCC đi qua cả đường parse → normalize', () => {
       ['Ngày,Nội dung,MCC,Số tiền', '15/07/2026,MUA HANG MCC 9999,5411,-250.000'].join('\n'),
     );
 
-    const { rows } = normalize(parsed.rows, GENERIC_PROFILE);
+    const { rows } = normalize(parsed.rows, GENERIC_PROFILE, 'bank');
     expect(rows[0]?.mcc).toBe('5411');
   });
 
@@ -628,19 +629,30 @@ describe('sao kê thẻ tín dụng Mastercard — file thật', () => {
 
   async function run() {
     const parsed = await parse(STATEMENT);
-    const { rows } = normalize(parsed.rows, GENERIC_PROFILE);
+    // Đi qua detectAccount thật thay vì đóng cứng 'credit_card': việc file này
+    // được nhận ra là sao kê thẻ cũng là một phần cần kiểm.
+    const detected = detectAccount(GENERIC_PROFILE, parsed.rows);
+    const { rows } = normalize(parsed.rows, GENERIC_PROFILE, detected.kind);
     return {
       parsed,
+      detected,
       rows: rows.map((row) => ({ ...row, categoryId: categorize(row, defaultRules, mccRules) })),
     };
   }
 
+  it('nhận ra đây là sao kê thẻ tín dụng, không phải tài khoản ngân hàng', async () => {
+    const { detected } = await run();
+
+    expect(detected.kind).toBe('credit_card');
+    expect(detected.fingerprint).toBe('generic:credit_card');
+  });
+
   it('nhận đúng cột dù header song ngữ hai dòng', async () => {
     const { parsed } = await run();
 
-    // 8 giao dịch: 7 dòng mua hàng + 1 dòng hoàn tiền. Dòng "Số thẻ", dòng tổng
-    // cộng và dòng thanh toán sao kê đều bị bỏ.
-    expect(parsed.rows).toHaveLength(8);
+    // 9 giao dịch: 7 dòng mua hàng + 1 hoàn tiền + 1 thanh toán sao kê. Chỉ dòng
+    // "Số thẻ" và các dòng tổng cộng bị bỏ.
+    expect(parsed.rows).toHaveLength(9);
     // Ngày lấy ở cột GIAO DỊCH, không phải cột hạch toán
     expect(parsed.rows[0]?.date).toBe('2026-04-13');
   });
@@ -657,6 +669,7 @@ describe('sao kê thẻ tín dụng Mastercard — file thật', () => {
       '5814',
       '5262',
       null, // dòng hoàn tiền không có MCC
+      '6012', // thanh toán sao kê — MCC nhóm tài chính
     ]);
   });
 
@@ -705,23 +718,34 @@ describe('sao kê thẻ tín dụng Mastercard — file thật', () => {
     expect(rows[7]).toMatchObject({ type: 'income', categoryId: 'income:Tiền hoàn' });
   });
 
-  it('THANH TOÁN SAO KÊ bị bỏ hẳn, không vào tổng thu', async () => {
+  it('THANH TOÁN SAO KÊ được giữ nhưng đánh dấu nội bộ, không vào tổng thu', async () => {
     const { parsed, rows } = await run();
 
-    // 2,7 triệu trả nợ thẻ là tiền đổi chỗ giữa hai túi của cùng một người. Giữ
-    // lại thì tổng thu của tháng phồng lên đúng bằng số tiền đó.
-    expect(rows.some((row) => row.amount === 2_695_479n)).toBe(false);
-    expect(rows.filter((row) => row.type === 'income')).toHaveLength(1); // chỉ còn dòng hoàn tiền
+    // 2,7 triệu trả nợ thẻ là tiền đổi chỗ giữa hai túi của cùng một người. Nó
+    // được GIỮ — dư nợ thẻ cần dòng ghi có này mới giảm được — nhưng mang
+    // internalKind nên mọi query thống kê lọc nó ra.
+    const payment = rows.find((row) => row.amount === 2_695_479n);
+    expect(payment).toMatchObject({ type: 'income', internalKind: 'card_payment' });
 
-    // Bỏ chứ không giấu: nó hiện ở preview kèm lý do
-    const skipped = parsed.skipped.find((row) => /thanh toán sao kê/i.test(row.reason));
-    expect(skipped?.raw).toContain('Thanh toan sao ke the Master Card');
+    // Không bị bỏ, nên không xuất hiện trong danh sách dòng bị skip
+    expect(parsed.skipped.some((row) => /thanh toán sao kê/i.test(row.reason))).toBe(false);
+
+    // Thu nhập THẬT chỉ còn dòng hoàn tiền
+    const realIncome = rows.filter((row) => row.type === 'income' && row.internalKind === null);
+    expect(realIncome).toHaveLength(1);
+    expect(realIncome[0]?.amount).toBe(100_000n);
   });
 
-  it('cùng nội dung đó ở chiều CHI thì phải giữ — sao kê tài khoản thanh toán', async () => {
-    // Mặt kia của đúng giao dịch trên. Nếu người dùng chỉ import sao kê ngân hàng
-    // thì đây là dấu vết duy nhất của số tiền đã tiêu bằng thẻ; bỏ nó đi là làm
-    // chi tiêu của họ bốc hơi.
+  it('hoàn tiền KHÔNG bị coi là nội bộ — đó là tiền thật được trả lại', async () => {
+    const { rows } = await run();
+
+    expect(rows[7]).toMatchObject({ amount: 100_000n, internalKind: null });
+  });
+
+  it('mặt kia của cùng giao dịch, trên sao kê ngân hàng, cũng là nội bộ', async () => {
+    // Đây là ca sinh ra việc đếm hai lần: khoản mua bằng thẻ nằm ở file thẻ, còn
+    // file ngân hàng có khoản trả nợ. Cả hai vế cùng mang internalKind nên không
+    // vế nào cộng vào chi tiêu, và các dòng mua hàng chỉ được đếm một lần.
     const parsed = await parse(
       [
         'Ngày,Nội dung,Số tiền',
@@ -729,7 +753,13 @@ describe('sao kê thẻ tín dụng Mastercard — file thật', () => {
       ].join('\n'),
     );
 
-    expect(parsed.skipped).toEqual([]);
-    expect(parsed.rows[0]?.amount).toBe(-2_695_479n);
+    expect(detectAccount(GENERIC_PROFILE, parsed.rows).kind).toBe('bank');
+
+    const { rows } = normalize(parsed.rows, GENERIC_PROFILE, 'bank');
+    expect(rows[0]).toMatchObject({
+      type: 'expense',
+      amount: 2_695_479n,
+      internalKind: 'card_payment',
+    });
   });
 });

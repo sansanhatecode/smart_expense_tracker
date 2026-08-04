@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   numberToBigint,
   type BulkCategorizeInput,
+  type BulkDeleteTransactionsInput,
   type CreateTransactionInput,
   type Paginated,
   type TransactionDto,
@@ -13,6 +14,7 @@ import { computeDedupeHash, dedupeGroupKey, normalizeDescription } from '../impo
 import type { TxType } from '../generated/prisma/enums';
 import {
   TransactionsRepository,
+  type OwnedCategory,
   type TransactionPatch,
   type TransactionRow,
 } from './transactions.repository';
@@ -147,7 +149,34 @@ export class TransactionsService {
    */
   async bulkCategorize(userId: string, input: BulkCategorizeInput): Promise<{ updated: number }> {
     if (input.categoryId) {
-      await this.assertOwnsCategory(userId, input.categoryId);
+      const category = await this.assertOwnsCategory(userId, input.categoryId);
+
+      /*
+       * Chiều thu/chi phải khớp — cùng quy tắc với gán từng giao dịch, và vì đúng
+       * cái lý do đã ghi ở `assertOwnsCategory`: gán khoản chi vào danh mục thu
+       * làm thống kê theo danh mục ra số vô nghĩa mà không có gì báo lỗi.
+       *
+       * Chặn cả lô thay vì lặng lẽ bỏ qua các dòng lệch chiều: `updated` nhỏ hơn
+       * số đã chọn là thứ người dùng không nhìn thấy, và họ sẽ tin là đã gán xong.
+       *
+       * 400 chứ không phải 404 như đường gán từng cái: ở đây danh mục CÓ tồn tại,
+       * cái sai là tổ hợp đã chọn.
+       */
+      const mismatched = await this.transactions.countMismatchedType(
+        userId,
+        input.transactionIds,
+        category.type,
+      );
+
+      if (mismatched > 0) {
+        const categoryDirection = category.type === 'income' ? 'thu' : 'chi';
+        const rowDirection = category.type === 'income' ? 'chi' : 'thu';
+
+        throw new BadRequestException(
+          `${mismatched} giao dịch đã chọn là giao dịch ${rowDirection}, không gán được vào ` +
+            `danh mục ${categoryDirection} "${category.name}". Bỏ chọn những giao dịch ${rowDirection} rồi thử lại.`,
+        );
+      }
     }
 
     const updated = await this.transactions.setCategoryMany(
@@ -157,6 +186,22 @@ export class TransactionsService {
     );
 
     return { updated };
+  }
+
+  /**
+   * Xoá nhiều giao dịch cùng lúc.
+   *
+   * Không kiểm sở hữu từng id trước rồi mới xoá: `deleteMany` đã lọc theo
+   * `userId` nên id lạ không xoá được gì, và `deleted` nói đúng số dòng đã mất.
+   * Kiểm trước chỉ thêm một vòng truy vấn cho cùng một kết quả.
+   */
+  async bulkDelete(
+    userId: string,
+    input: BulkDeleteTransactionsInput,
+  ): Promise<{ deleted: number }> {
+    const deleted = await this.transactions.deleteMany(userId, input.transactionIds);
+
+    return { deleted };
   }
 
   /** Đếm số giao dịch đã có cùng khoá dedupe, kể cả phần mô tả đã normalize. */
@@ -192,12 +237,15 @@ export class TransactionsService {
    *
    * Kiểm tra chiều là để không xảy ra chuyện gán giao dịch chi vào danh mục thu:
    * thống kê theo danh mục sẽ ra số vô nghĩa mà không có gì báo lỗi.
+   *
+   * Trả về danh mục để chỗ gọi dùng tiếp `type`/`name` mà không phải truy vấn
+   * lại — đường bulk cần cả hai để tự kiểm chiều và viết được message cụ thể.
    */
   private async assertOwnsCategory(
     userId: string,
     categoryId: string,
     type?: TxType,
-  ): Promise<void> {
+  ): Promise<OwnedCategory> {
     const category = await this.transactions.findOwnedCategory(userId, categoryId);
 
     if (!category) {
@@ -210,6 +258,8 @@ export class TransactionsService {
           `không dùng được cho giao dịch ${type === 'income' ? 'thu' : 'chi'}`,
       );
     }
+
+    return category;
   }
 
   /** Chặn việc gắn giao dịch vào nguồn tiền của user khác bằng cách nhồi id lạ. */

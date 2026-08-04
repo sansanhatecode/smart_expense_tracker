@@ -2,6 +2,7 @@
 
 import type {
   AccountDto,
+  CategoryDto,
   CreateTransactionInput,
   InternalFilter,
   InternalKind,
@@ -160,6 +161,16 @@ function TransactionsView() {
   });
   const [showForm, setShowForm] = useState(false);
 
+  /**
+   * Các dòng đang tick, để gán danh mục hoặc xoá cả lô.
+   *
+   * Bị xoá sạch mỗi lần đổi filter hoặc sang trang (xem `update`): giữ lại thì
+   * người dùng bấm Xoá và mất cả những dòng họ không còn nhìn thấy. Nhờ vậy mọi
+   * id trong đây luôn nằm trong trang đang hiện — điều kiện để biết chiều thu/chi
+   * của lô mà không phải hỏi lại server.
+   */
+  const [selected, setSelected] = useState<string[]>([]);
+
   const categories = useCategories();
   const queryClient = useQueryClient();
 
@@ -220,9 +231,59 @@ function TransactionsView() {
     onSuccess: invalidate,
   });
 
-  /** Đổi filter thì luôn về trang 1 — giữ trang cũ có thể ra trang rỗng. */
-  const update = (patch: Partial<Filters>) =>
+  const bulkCategorize = useMutation({
+    mutationFn: (categoryId: string | null) =>
+      api.patch<{ updated: number }>('/api/transactions/bulk-categorize', {
+        transactionIds: selected,
+        categoryId,
+      }),
+    onSuccess: () => {
+      invalidate();
+      setSelected([]);
+    },
+    // API chặn lô lệch chiều thu/chi và message của nó nói được cách sửa, nên
+    // hiện thẳng ra thay vì thay bằng câu chung chung.
+    onError: (error) =>
+      alert(error instanceof ApiError ? error.message : 'Không gán được danh mục'),
+  });
+
+  const bulkRemove = useMutation({
+    mutationFn: () =>
+      api.delete<{ deleted: number }>('/api/transactions', { transactionIds: selected }),
+    onSuccess: () => {
+      invalidate();
+      setSelected([]);
+    },
+    onError: (error) => alert(error instanceof ApiError ? error.message : 'Không xoá được'),
+  });
+
+  /**
+   * Đổi filter thì luôn về trang 1 — giữ trang cũ có thể ra trang rỗng.
+   *
+   * Đây là cửa duy nhất để đổi filter VÀ trang, nên cũng là chỗ duy nhất cần xoá
+   * lựa chọn. Phân trang cũng đi qua đây vì lý do đó.
+   */
+  const update = (patch: Partial<Filters>) => {
     setFilters((current) => ({ ...current, ...patch, page: patch.page ?? 1 }));
+    setSelected([]);
+  };
+
+  const rows = transactions.data?.items ?? [];
+  const allSelected = rows.length > 0 && rows.every((row) => selected.includes(row.id));
+  const someSelected = selected.length > 0 && !allSelected;
+
+  /**
+   * Chiều thu/chi của lô đang chọn, `null` nếu lô trộn cả hai.
+   *
+   * Quyết định danh mục nào được phép gán: danh mục thu không dùng được cho giao
+   * dịch chi (API sẽ từ chối), nên chỉ hiện đúng những cái gán được — báo lỗi sau
+   * khi bấm là cách tệ hơn để nói cùng một điều.
+   */
+  const selectedType = ((): TxType | null => {
+    const types = new Set(rows.filter((row) => selected.includes(row.id)).map((row) => row.type));
+
+    return types.size === 1 ? [...types][0]! : null;
+  })();
 
   // Mục "không có" đứng đầu danh sách: sau import luôn còn một mớ chưa phân loại,
   // và nó là thứ người dùng tìm nhiều nhất ở đây.
@@ -390,12 +451,71 @@ function TransactionsView() {
           />
         ) : (
           <>
+            {/*
+              Hàng chọn cả trang. Nằm trong cùng một Card với danh sách và ngay
+              trên nó, vì "cả trang" nghĩa là đúng những dòng nhìn thấy bên dưới.
+            */}
+            <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3 sm:px-5">
+              <input
+                type="checkbox"
+                className="size-4 shrink-0"
+                style={{ accentColor: 'var(--accent)' }}
+                aria-label="Chọn tất cả giao dịch trong trang"
+                checked={allSelected}
+                // Tick một phần thì ô hiện dấu gạch, không phải ô trống: ô trống
+                // nói sai rằng chưa chọn gì.
+                ref={(node) => {
+                  if (node) node.indeterminate = someSelected;
+                }}
+                onChange={() => setSelected(allSelected ? [] : rows.map((row) => row.id))}
+              />
+
+              {selected.length === 0 ? (
+                <span className="text-sm text-ink-muted">
+                  Tick để gán danh mục hoặc xoá nhiều giao dịch một lượt
+                </span>
+              ) : (
+                <BulkActions
+                  count={selected.length}
+                  categories={categories.data ?? []}
+                  selectedType={selectedType}
+                  busy={bulkCategorize.isPending || bulkRemove.isPending}
+                  onCategorize={(categoryId) => bulkCategorize.mutate(categoryId)}
+                  onDelete={() => {
+                    if (
+                      confirm(
+                        `Xoá ${selected.length} giao dịch đã chọn? Việc này không hoàn lại được.`,
+                      )
+                    ) {
+                      bulkRemove.mutate();
+                    }
+                  }}
+                  onClear={() => setSelected([])}
+                />
+              )}
+            </div>
+
             <ul className="divide-y">
               {transactions.data.items.map((tx) => (
                 <li
                   key={tx.id}
                   className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5"
                 >
+                  <input
+                    type="checkbox"
+                    className="size-4 shrink-0"
+                    style={{ accentColor: 'var(--accent)' }}
+                    aria-label={`Chọn ${tx.description}`}
+                    checked={selected.includes(tx.id)}
+                    onChange={() =>
+                      setSelected((current) =>
+                        current.includes(tx.id)
+                          ? current.filter((id) => id !== tx.id)
+                          : [...current, tx.id],
+                      )
+                    }
+                  />
+
                   <CategoryIcon
                     icon={tx.category?.icon ?? 'CircleHelp'}
                     color={tx.category?.color ?? '#898781'}
@@ -488,17 +608,19 @@ function TransactionsView() {
                   Trang {transactions.data.page} / {transactions.data.totalPages}
                 </p>
                 <div className="flex gap-2">
+                  {/* Qua `update` chứ không `setFilters` trực tiếp: sang trang
+                      phải xoá lựa chọn, và `update` là chỗ giữ quy tắc đó. */}
                   <Button
                     size="sm"
                     disabled={filters.page <= 1}
-                    onClick={() => setFilters((f) => ({ ...f, page: f.page - 1 }))}
+                    onClick={() => update({ page: filters.page - 1 })}
                   >
                     Trước
                   </Button>
                   <Button
                     size="sm"
                     disabled={filters.page >= transactions.data.totalPages}
-                    onClick={() => setFilters((f) => ({ ...f, page: f.page + 1 }))}
+                    onClick={() => update({ page: filters.page + 1 })}
                   >
                     Sau
                   </Button>
@@ -508,6 +630,79 @@ function TransactionsView() {
           </>
         )}
       </Card>
+    </div>
+  );
+}
+
+// ─── Thao tác trên nhiều dòng ────────────────────────────────────────────────
+
+/**
+ * Thanh hành động cho lô đang chọn.
+ *
+ * Chỉ hiện những danh mục gán ĐƯỢC: API từ chối gán giao dịch chi vào danh mục
+ * thu, nên đưa chúng vào select rồi báo lỗi sau khi bấm là cách tệ hơn để nói
+ * cùng một điều. Lô trộn cả thu lẫn chi thì không danh mục nào hợp cả hai — lúc
+ * đó chỉ còn "Chưa phân loại" (bỏ danh mục), kèm câu giải thích.
+ */
+function BulkActions({
+  count,
+  categories,
+  selectedType,
+  busy,
+  onCategorize,
+  onDelete,
+  onClear,
+}: {
+  count: number;
+  categories: CategoryDto[];
+  /** null = lô trộn cả thu lẫn chi. */
+  selectedType: TxType | null;
+  busy: boolean;
+  onCategorize: (categoryId: string | null) => void;
+  onDelete: () => void;
+  onClear: () => void;
+}) {
+  const usable = selectedType ? categories.filter((item) => item.type === selectedType) : [];
+
+  return (
+    <div className="flex flex-1 flex-wrap items-center gap-2">
+      <span className="text-sm font-medium text-ink">Đã chọn {count}</span>
+
+      <Select
+        aria-label="Gán danh mục cho các giao dịch đã chọn"
+        // Luôn quay về placeholder: đây là một hành động, không phải trạng thái
+        // của lô — lô có thể đang gồm nhiều danh mục khác nhau.
+        value=""
+        disabled={busy}
+        onChange={(e) => {
+          if (e.target.value === '') return;
+          onCategorize(e.target.value === NONE ? null : e.target.value);
+        }}
+        className="h-8 w-full text-sm sm:w-52"
+      >
+        <option value="">Gán danh mục…</option>
+        <option value={NONE}>Chưa phân loại</option>
+        {usable.map((category) => (
+          <option key={category.id} value={category.id}>
+            {category.name}
+          </option>
+        ))}
+      </Select>
+
+      {selectedType === null && (
+        <span className="text-sm text-ink-muted">
+          Lô có cả giao dịch thu và chi nên không danh mục nào dùng chung được
+        </span>
+      )}
+
+      <Button variant="danger" size="sm" disabled={busy} onClick={onDelete}>
+        <Trash2 aria-hidden className="size-4" />
+        Xoá {count} giao dịch
+      </Button>
+
+      <Button variant="ghost" size="sm" disabled={busy} onClick={onClear}>
+        Bỏ chọn
+      </Button>
     </div>
   );
 }

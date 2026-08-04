@@ -169,7 +169,10 @@ export const api = {
     request<T>(path, { method: 'POST', ...(body !== undefined ? { body } : {}) }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PATCH', ...(body !== undefined ? { body } : {}) }),
-  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  // Body là optional: xoá một resource thì không cần, còn xoá nhiều thì danh sách
+  // id phải đi kèm ở body.
+  delete: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'DELETE', ...(body !== undefined ? { body } : {}) }),
   upload: <T>(path: string, formData: FormData) =>
     request<T>(path, { method: 'POST', formData }),
 };

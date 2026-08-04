@@ -159,6 +159,33 @@ export class TransactionsRepository {
   }
 
   /**
+   * Xoá nhiều giao dịch một lượt.
+   *
+   * `userId` trong where là thứ chặn việc xoá giao dịch của người khác bằng cách
+   * nhồi id lạ vào danh sách — cùng lý do với `setCategoryMany`. Trả về số dòng
+   * thật sự bị xoá, nên id không thuộc user chỉ đơn giản không được tính.
+   */
+  async deleteMany(userId: string, ids: string[]): Promise<number> {
+    const result = await this.prisma.transaction.deleteMany({
+      where: { id: { in: ids }, userId },
+    });
+
+    return result.count;
+  }
+
+  /**
+   * Đếm trong danh sách có bao nhiêu giao dịch KHÁC chiều `type`.
+   *
+   * Dùng để chặn gán cả một lô vào danh mục lệch chiều. Đếm ở DB thay vì kéo cả
+   * lô về app: danh sách có thể tới 500 id, mà câu trả lời cần chỉ là một số.
+   */
+  countMismatchedType(userId: string, ids: string[], type: TxType): Promise<number> {
+    return this.prisma.transaction.count({
+      where: { id: { in: ids }, userId, type: { not: type } },
+    });
+  }
+
+  /**
    * Mô tả của các giao dịch cùng (ngày, số tiền, chiều tiền).
    *
    * Trả về mô tả GỐC chứ không đếm sẵn: khoá dedupe tính trên mô tả đã

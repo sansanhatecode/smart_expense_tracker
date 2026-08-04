@@ -194,3 +194,16 @@ export const bulkCategorizeSchema = z.object({
 });
 
 export type BulkCategorizeInput = z.infer<typeof bulkCategorizeSchema>;
+
+/**
+ * Xoá nhiều giao dịch một lượt.
+ *
+ * Cùng mức trần 500 với `bulkCategorizeSchema`: không phải giới hạn kỹ thuật mà
+ * là chặn trên cho một cú bấm không hoàn lại được. Cần xoá nhiều hơn thế thì
+ * gần như luôn là muốn rollback cả batch import — đã có route riêng cho việc đó.
+ */
+export const bulkDeleteTransactionsSchema = z.object({
+  transactionIds: z.array(z.string().min(1)).min(1).max(500),
+});
+
+export type BulkDeleteTransactionsInput = z.infer<typeof bulkDeleteTransactionsSchema>;

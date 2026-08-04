@@ -3,12 +3,13 @@
 import type {
   AccountDto,
   CreateTransactionInput,
+  InternalFilter,
   InternalKind,
   Paginated,
   TransactionDto,
   TxType,
 } from '@expense/shared';
-import { formatVnd, parseVndInput } from '@expense/shared';
+import { expandInternalFilter, formatVnd, parseVndInput } from '@expense/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, Shuffle, Trash2, X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
@@ -25,20 +26,42 @@ import {
   ErrorState,
   Field,
   Input,
+  MultiSelect,
   Select,
   Skeleton,
+  type MultiSelectOption,
 } from '@/components/ui';
 
 const PAGE_SIZE = 25;
 
+/**
+ * Giá trị đại diện mục "không có" trong danh sách tick được: "Chưa phân loại" ở
+ * danh mục, "Không rõ nguồn" ở nguồn tiền.
+ *
+ * Cần một token riêng vì hai mục đó là `IS NULL` chứ không phải một id, nên
+ * chúng đi lên API bằng tham số khác (`uncategorized`, `noAccount`). Chuỗi có
+ * gạch dưới hai đầu để không đụng id thật.
+ */
+const NONE = '__none__';
+
+/** Danh sách tick → tham số id cho API, đã bỏ `NONE`. Rỗng → không gửi. */
+function idsParam(values: string[]): string | undefined {
+  const ids = values.filter((value) => value !== NONE);
+
+  return ids.length > 0 ? ids.join(',') : undefined;
+}
+
 interface Filters {
+  /** Rỗng = không chặn đầu đó. */
   from: string;
   to: string;
   type: '' | TxType;
-  categoryId: string;
-  uncategorized: boolean;
-  accountId: string;
-  internal: '' | 'only' | 'exclude';
+  /** Có thể chứa `NONE`. */
+  categoryIds: string[];
+  /** Có thể chứa `NONE`. */
+  accountIds: string[];
+  /** 'none' = khoản KHÔNG nội bộ, ba giá trị còn lại là từng lý do một. */
+  internal: InternalFilter[];
   /** 'out' = chỉ khoản làm tiền rời khỏi nguồn. Loại trừ với `type`, xem `TYPE_OPTIONS`. */
   cashflow: '' | 'out';
   q: string;
@@ -65,6 +88,14 @@ const TYPE_OPTIONS = [
   patch: Pick<Filters, 'type' | 'cashflow'>;
 }>;
 
+/** Nhãn của từng mục ở ô "Khoản nội bộ", theo thứ tự hiện ra. */
+const INTERNAL_OPTIONS: MultiSelectOption[] = [
+  { value: 'none', label: 'Không phải khoản nội bộ' },
+  { value: 'card_payment', label: 'Trả nợ thẻ' },
+  { value: 'wallet_topup', label: 'Nạp ví' },
+  { value: 'self_transfer', label: 'Chuyển nội bộ' },
+];
+
 /** Nhãn của từng lý do "đây là tiền đổi chỗ, không phải chi tiêu". */
 const INTERNAL_LABEL: Record<InternalKind, string> = {
   card_payment: 'Trả nợ thẻ',
@@ -87,8 +118,14 @@ export default function TransactionsPage() {
 function TransactionsView() {
   const month = currentMonthRange();
   const searchParams = useSearchParams();
-  const initialInternal = searchParams.get('internal');
   const initialType = searchParams.get('type');
+
+  /** `'a,b'` → `['a','b']`. Vắng mặt hoặc rỗng → `[]`. */
+  const csv = (name: string) =>
+    (searchParams.get(name) ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part !== '');
 
   const [filters, setFilters] = useState<Filters>({
     // Kỳ đến từ URL nếu có: dashboard link sang đây với đúng tháng đang xem, và
@@ -103,11 +140,20 @@ function TransactionsView() {
     // validate bằng zod nên `?type=abc` sẽ thành 400, và người dùng thấy màn
     // hình lỗi thay vì một danh sách.
     type: initialType === 'income' || initialType === 'expense' ? initialType : '',
-    // `uncategorized` thắng `categoryId` ở cả FE và BE — xem buildWhere.
-    categoryId: searchParams.get('categoryId') ?? '',
-    uncategorized: searchParams.get('uncategorized') === 'true',
-    accountId: searchParams.get('accountId') ?? '',
-    internal: initialInternal === 'only' || initialInternal === 'exclude' ? initialInternal : '',
+    // "Chưa phân loại" / "Không rõ nguồn" đi lên API bằng tham số riêng, nhưng
+    // trong state chúng là một phần tử của danh sách tick — người dùng thấy đúng
+    // một danh sách, không phải một danh sách cộng một checkbox lẻ.
+    categoryIds: [
+      ...csv('categoryId'),
+      ...(searchParams.get('uncategorized') === 'true' ? [NONE] : []),
+    ],
+    accountIds: [
+      ...csv('accountId'),
+      ...(searchParams.get('noAccount') === 'true' ? [NONE] : []),
+    ],
+    // Dịch `internal=exclude` của các link cũ về dạng chuẩn bằng đúng hàm mà API
+    // dùng, nên hai bên không thể hiểu lệch nhau.
+    internal: expandInternalFilter(csv('internal')),
     cashflow: searchParams.get('cashflow') === 'out' ? 'out' : '',
     q: '',
     page: 1,
@@ -132,10 +178,13 @@ function TransactionsView() {
         from: filters.from || undefined,
         to: filters.to || undefined,
         type: filters.type || undefined,
-        categoryId: filters.uncategorized ? undefined : filters.categoryId || undefined,
-        uncategorized: filters.uncategorized ? 'true' : undefined,
-        accountId: filters.accountId || undefined,
-        internal: filters.internal || undefined,
+        // Tách `NONE` ra khỏi danh sách id: nó là `IS NULL` nên đi bằng tham số
+        // riêng. Gửi kèm cả hai nghĩa union — xem buildWhere.
+        categoryId: idsParam(filters.categoryIds),
+        uncategorized: filters.categoryIds.includes(NONE) ? 'true' : undefined,
+        accountId: idsParam(filters.accountIds),
+        noAccount: filters.accountIds.includes(NONE) ? 'true' : undefined,
+        internal: filters.internal.length > 0 ? filters.internal.join(',') : undefined,
         cashflow: filters.cashflow || undefined,
         q: filters.q || undefined,
         page: filters.page,
@@ -174,6 +223,25 @@ function TransactionsView() {
   /** Đổi filter thì luôn về trang 1 — giữ trang cũ có thể ra trang rỗng. */
   const update = (patch: Partial<Filters>) =>
     setFilters((current) => ({ ...current, ...patch, page: patch.page ?? 1 }));
+
+  // Mục "không có" đứng đầu danh sách: sau import luôn còn một mớ chưa phân loại,
+  // và nó là thứ người dùng tìm nhiều nhất ở đây.
+  const categoryOptions: MultiSelectOption[] = [
+    { value: NONE, label: 'Chưa phân loại' },
+    ...(categories.data ?? []).map((category) => ({
+      value: category.id,
+      // Mũi tên phân biệt danh mục thu với danh mục chi cùng tên.
+      label: `${category.type === 'income' ? '↑' : '↓'} ${category.name}`,
+    })),
+  ];
+
+  const accountOptions: MultiSelectOption[] = [
+    { value: NONE, label: 'Không rõ nguồn' },
+    ...(accounts.data ?? []).map((account) => ({
+      value: account.id,
+      label: account.name,
+    })),
+  ];
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -233,49 +301,32 @@ function TransactionsView() {
               ))}
             </Select>
           </Field>
-          <Field label="Danh mục">
-            <Select
-              value={filters.uncategorized ? '__none__' : filters.categoryId}
-              onChange={(e) =>
-                update(
-                  e.target.value === '__none__'
-                    ? { uncategorized: true, categoryId: '' }
-                    : { uncategorized: false, categoryId: e.target.value },
-                )
-              }
-            >
-              <option value="">Tất cả</option>
-              <option value="__none__">Chưa phân loại</option>
-              {(categories.data ?? []).map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.type === 'income' ? '↑ ' : '↓ '}
-                  {category.name}
-                </option>
-              ))}
-            </Select>
+          <Field label="Danh mục" as="div">
+            <MultiSelect
+              label="Lọc theo danh mục"
+              options={categoryOptions}
+              selected={filters.categoryIds}
+              onChange={(categoryIds) => update({ categoryIds })}
+            />
           </Field>
-          <Field label="Nguồn tiền">
-            <Select
-              value={filters.accountId}
-              onChange={(e) => update({ accountId: e.target.value })}
-            >
-              <option value="">Tất cả</option>
-              {(accounts.data ?? []).map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
-                </option>
-              ))}
-            </Select>
+          <Field label="Nguồn tiền" as="div">
+            <MultiSelect
+              label="Lọc theo nguồn tiền"
+              options={accountOptions}
+              selected={filters.accountIds}
+              onChange={(accountIds) => update({ accountIds })}
+            />
           </Field>
-          <Field label="Khoản nội bộ">
-            <Select
-              value={filters.internal}
-              onChange={(e) => update({ internal: e.target.value as Filters['internal'] })}
-            >
-              <option value="">Hiện tất cả</option>
-              <option value="only">Chỉ khoản nội bộ</option>
-              <option value="exclude">Ẩn khoản nội bộ</option>
-            </Select>
+          <Field label="Khoản nội bộ" as="div">
+            <MultiSelect
+              label="Lọc theo khoản nội bộ"
+              options={INTERNAL_OPTIONS}
+              selected={filters.internal}
+              // Panel chỉ trả về giá trị từ INTERNAL_OPTIONS, nhưng vẫn lọc qua
+              // expandInternalFilter để state không thể nhận giá trị lạ.
+              onChange={(values) => update({ internal: expandInternalFilter(values) })}
+              allLabel="Hiện tất cả"
+            />
           </Field>
           <Field label="Tìm trong mô tả">
             <div className="relative">
@@ -305,9 +356,12 @@ function TransactionsView() {
           </p>
         )}
 
-        {filters.internal === 'only' && (
+        {/* Hiện khi đang xem ít nhất một LOẠI khoản nội bộ. Tick thêm "Không phải
+            khoản nội bộ" thì danh sách có cả hai thứ, dòng này vẫn đúng và vẫn
+            cần: nút "Tính lại" chỉ có ở các dòng nội bộ. */}
+        {filters.internal.some((value) => value !== 'none') && (
           <p className="mt-3 text-sm text-ink-secondary">
-            Đây là các khoản đã bị loại khỏi thống kê thu chi vì được coi là tiền
+            Các khoản nội bộ đã bị loại khỏi thống kê thu chi vì được coi là tiền
             đổi chỗ giữa các nguồn của bạn. Nếu có khoản nào thật sự là chi tiêu,
             bấm <span className="font-medium text-ink">Tính lại</span> để đưa nó
             trở lại.

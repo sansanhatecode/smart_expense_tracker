@@ -194,8 +194,26 @@ export class TransactionsRepository {
   }
 }
 
-function buildWhere(userId: string, query: TransactionQuery): Prisma.TransactionWhereInput {
+/**
+ * Export để test được: đây là hàm thuần, và từ lúc danh mục / nguồn tiền / khoản
+ * nội bộ nhận nhiều giá trị thì số tổ hợp của nó vượt xa mức đọc code mà chắc.
+ * Không có chỗ nào ngoài repository này gọi nó.
+ */
+export function buildWhere(
+  userId: string,
+  query: TransactionQuery,
+): Prisma.TransactionWhereInput {
   const where: Prisma.TransactionWhereInput = { userId };
+
+  /*
+   * Các điều kiện dạng OR đi vào đây rồi gắn một lần ở cuối.
+   *
+   * Không ghi thẳng `where.OR`: đã có ba nhóm OR độc lập (danh mục, nguồn tiền,
+   * khoản nội bộ) cộng nhóm của `cashflow`, mà `where.OR` chỉ có MỘT chỗ — nhóm
+   * sau sẽ ghi đè nhóm trước và cái filter bị đè im lặng không có tác dụng. Gộp
+   * vào `AND` giữ đúng nghĩa "mỗi nhóm phải thoả".
+   */
+  const and: Prisma.TransactionWhereInput[] = [];
 
   if (query.from || query.to) {
     where.date = {
@@ -205,28 +223,59 @@ function buildWhere(userId: string, query: TransactionQuery): Prisma.Transaction
     };
   }
 
-  // `uncategorized` thắng `categoryId` khi cả hai được truyền — chúng loại trừ
-  // nhau, và lọc "chưa phân loại" là ý định cụ thể hơn.
-  if (query.uncategorized) {
+  /*
+   * Danh mục: `uncategorized` cộng DỒN với danh sách id, không đè lên nó.
+   *
+   * Trước đây hai cái loại trừ nhau và `uncategorized` thắng. Với filter tick
+   * nhiều thì "Ăn uống + Chưa phân loại" là một câu hỏi hợp lý, mà đè thì một
+   * trong hai tick sẽ không có tác dụng gì và người dùng không hiểu tại sao.
+   */
+  const categoryIds = query.categoryId ?? [];
+
+  if (query.uncategorized && categoryIds.length > 0) {
+    and.push({ OR: [{ categoryId: null }, { categoryId: { in: categoryIds } }] });
+  } else if (query.uncategorized) {
     where.categoryId = null;
-  } else if (query.categoryId) {
-    where.categoryId = query.categoryId;
+  } else if (categoryIds.length > 0) {
+    where.categoryId = { in: categoryIds };
   }
 
   if (query.type) {
     where.type = query.type;
   }
 
-  if (query.accountId) {
-    where.accountId = query.accountId;
+  // Nguồn tiền: cùng hình dạng với danh mục. `noAccount` là giao dịch nhập tay
+  // không gắn nguồn — `IS NULL`, không phải một id, nên không nhét vào danh sách.
+  const accountIds = query.accountId ?? [];
+
+  if (query.noAccount && accountIds.length > 0) {
+    and.push({ OR: [{ accountId: null }, { accountId: { in: accountIds } }] });
+  } else if (query.noAccount) {
+    where.accountId = null;
+  } else if (accountIds.length > 0) {
+    where.accountId = { in: accountIds };
   }
 
-  // `only` chính là màn hình "các khoản đã bị loại khỏi thống kê" — không cần
-  // dựng route riêng cho nó.
-  if (query.internal === 'only') {
-    where.internalKind = { not: null };
-  } else if (query.internal === 'exclude') {
-    where.internalKind = null;
+  /*
+   * Khoản nội bộ. `none` = không phải khoản nội bộ (`IS NULL`), ba giá trị còn
+   * lại là từng lý do một — nên tick được đúng "chỉ khoản trả nợ thẻ".
+   *
+   * `only`/`exclude` cũ đã được dịch về dạng này ở tầng schema, nên ở đây chỉ có
+   * một vocabulary. Tick cả bốn thì điều kiện phủ mọi dòng — đúng nghĩa "không
+   * lọc gì", không cần trường hợp riêng.
+   */
+  const internal = query.internal ?? [];
+
+  if (internal.length > 0) {
+    const kinds = internal.filter((value): value is InternalKind => value !== 'none');
+
+    if (kinds.length > 0 && internal.includes('none')) {
+      and.push({ OR: [{ internalKind: null }, { internalKind: { in: kinds } }] });
+    } else if (kinds.length > 0) {
+      where.internalKind = { in: kinds };
+    } else {
+      where.internalKind = null;
+    }
   }
 
   /*
@@ -238,16 +287,16 @@ function buildWhere(userId: string, query: TransactionQuery): Prisma.Transaction
    *
    * Điều kiện đi vào `AND` chứ không ghi thẳng lên `where.internalKind`: giữ
    * như vậy thì `internal` của người dùng vẫn giao được với nó một cách có
-   * nghĩa (exclude → chỉ khoản chi thường, only → chỉ khoản trả sao kê) thay vì
-   * cái nọ âm thầm ghi đè cái kia. `type` thì bị đè, vì "tiền đã ra" tự nó đã
-   * là một chiều tiền.
+   * nghĩa (chỉ khoản không nội bộ → chỉ khoản chi thường; chỉ trả nợ thẻ → chỉ
+   * khoản trả sao kê) thay vì cái nọ âm thầm ghi đè cái kia. `type` thì bị đè,
+   * vì "tiền đã ra" tự nó đã là một chiều tiền.
    */
   if (query.cashflow === 'out') {
     where.type = 'expense';
-    where.AND = [
+    and.push(
       { OR: [{ accountId: null }, { account: { kind: { not: 'credit_card' } } }] },
       { OR: [{ internalKind: null }, { internalKind: 'card_payment' }] },
-    ];
+    );
   }
 
   if (query.importBatchId) {
@@ -256,6 +305,10 @@ function buildWhere(userId: string, query: TransactionQuery): Prisma.Transaction
 
   if (query.q) {
     where.description = { contains: query.q, mode: 'insensitive' };
+  }
+
+  if (and.length > 0) {
+    where.AND = and;
   }
 
   return where;

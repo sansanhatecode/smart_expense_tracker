@@ -399,16 +399,16 @@ export default function DashboardPage() {
                     items={byAccount.data.expense.map((item) =>
                       accountBar(
                         item,
-                        // "Không rõ nguồn" (nhập tay, `accountId` null) KHÔNG có
-                        // link: không tồn tại filter "giao dịch không gắn nguồn",
-                        // nên link duy nhất dựng được sẽ ra một danh sách khác.
-                        item.accountId
-                          ? txLink({
-                              type: 'expense',
-                              internal: 'exclude',
-                              accountId: item.accountId,
-                            })
-                          : null,
+                        // "Không rõ nguồn" (nhập tay, `accountId` null) đi bằng
+                        // `noAccount` — không phải một id nên không nhét vào
+                        // `accountId` được.
+                        txLink({
+                          type: 'expense',
+                          internal: 'exclude',
+                          ...(item.accountId
+                            ? { accountId: item.accountId }
+                            : { noAccount: 'true' }),
+                        }),
                       ),
                     )}
                     emptyLabel="Import sao kê để thấy chi tiêu tách theo thẻ, tài khoản và ví"

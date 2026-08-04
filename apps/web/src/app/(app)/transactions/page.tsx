@@ -93,14 +93,19 @@ function TransactionsView() {
   const [filters, setFilters] = useState<Filters>({
     // Kỳ đến từ URL nếu có: dashboard link sang đây với đúng tháng đang xem, và
     // rơi về tháng hiện tại sẽ cho danh sách rỗng ngay sau khi vừa nói có N khoản.
+    //
+    // `?from=&to=` (có tham số nhưng để trống) là "không giới hạn kỳ" — trang
+    // Danh mục dùng nó, vì số "N giao dịch" ở đó đếm từ đầu đến giờ chứ không
+    // theo tháng. Chỉ khi tham số VẮNG MẶT mới rơi về tháng này.
     from: searchParams.get('from') ?? month.from,
     to: searchParams.get('to') ?? month.to,
     // Giá trị lạ trong URL rơi về "Tất cả" chứ không đi tiếp vào query: API
     // validate bằng zod nên `?type=abc` sẽ thành 400, và người dùng thấy màn
     // hình lỗi thay vì một danh sách.
     type: initialType === 'income' || initialType === 'expense' ? initialType : '',
-    categoryId: '',
-    uncategorized: false,
+    // `uncategorized` thắng `categoryId` ở cả FE và BE — xem buildWhere.
+    categoryId: searchParams.get('categoryId') ?? '',
+    uncategorized: searchParams.get('uncategorized') === 'true',
     accountId: searchParams.get('accountId') ?? '',
     internal: initialInternal === 'only' || initialInternal === 'exclude' ? initialInternal : '',
     cashflow: searchParams.get('cashflow') === 'out' ? 'out' : '',
@@ -121,8 +126,11 @@ function TransactionsView() {
     queryKey: ['transactions', filters],
     queryFn: () =>
       api.get<Paginated<TransactionDto>>('/api/transactions', {
-        from: filters.from,
-        to: filters.to,
+        // Ngày trống = không chặn đầu đó. Gửi chuỗi rỗng thì zod của API từ chối
+        // (`dateOnlySchema` đòi đúng dạng YYYY-MM-DD) và cả trang thành màn hình
+        // lỗi — tức xoá ô "Từ ngày" cũng đủ làm hỏng danh sách.
+        from: filters.from || undefined,
+        to: filters.to || undefined,
         type: filters.type || undefined,
         categoryId: filters.uncategorized ? undefined : filters.categoryId || undefined,
         uncategorized: filters.uncategorized ? 'true' : undefined,

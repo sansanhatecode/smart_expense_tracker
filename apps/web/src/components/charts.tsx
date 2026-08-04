@@ -340,9 +340,21 @@ export interface BreakdownBarItem {
   color: string;
   total: number;
   share: number;
+  /**
+   * Danh sách giao dịch của đúng dòng này. `null` = không link được.
+   *
+   * Chỗ gọi truyền vào chứ không tự dựng ở đây: link phải mang theo kỳ và các
+   * điều kiện mà con số này được cộng dưới đó, mà component bar thì không biết
+   * gì về chúng. Cùng lý do với `href` của StatTile — link ra một danh sách
+   * lệch số thì tệ hơn không có link.
+   */
+  href: string | null;
 }
 
-export function categoryBar(item: CategoryBreakdownItemDto): BreakdownBarItem {
+export function categoryBar(
+  item: CategoryBreakdownItemDto,
+  href: string | null = null,
+): BreakdownBarItem {
   return {
     id: item.categoryId,
     name: item.name,
@@ -350,10 +362,14 @@ export function categoryBar(item: CategoryBreakdownItemDto): BreakdownBarItem {
     color: item.color,
     total: item.total,
     share: item.share,
+    href,
   };
 }
 
-export function accountBar(item: AccountBreakdownItemDto): BreakdownBarItem {
+export function accountBar(
+  item: AccountBreakdownItemDto,
+  href: string | null = null,
+): BreakdownBarItem {
   return {
     id: item.accountId,
     name: item.name,
@@ -361,6 +377,7 @@ export function accountBar(item: AccountBreakdownItemDto): BreakdownBarItem {
     color: item.color,
     total: item.total,
     share: item.share,
+    href,
   };
 }
 
@@ -379,8 +396,8 @@ export function BreakdownBars({
 
   return (
     <ul className="divide-y">
-      {items.map((item) => (
-        <li key={item.id ?? 'none'} className="px-5 py-3">
+      {items.map((item) => {
+        const row = (
           <div className="flex items-center gap-3">
             <CategoryIcon icon={item.icon} color={item.color} />
 
@@ -414,8 +431,26 @@ export function BreakdownBars({
               </div>
             </div>
           </div>
-        </li>
-      ))}
+        );
+
+        return (
+          <li key={item.id ?? 'none'}>
+            {item.href ? (
+              <Link
+                href={item.href}
+                className="block px-5 py-3 transition-colors hover:bg-surface-raised"
+              >
+                {row}
+                {/* Tên của link nếu chỉ đọc nội dung là "Ăn uống 4.500.000 ₫ 32,1%",
+                    nghe không ra là đi được đâu. */}
+                <span className="sr-only">— xem giao dịch</span>
+              </Link>
+            ) : (
+              <div className="px-5 py-3">{row}</div>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }

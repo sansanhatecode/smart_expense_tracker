@@ -3,6 +3,7 @@
 import type { CategoryDto, CategoryRuleDto, CreateCategoryInput, TxType } from '@expense/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Tag, Trash2, X } from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 import { ApiError, api } from '@/lib/api';
 import { useCategories } from '@/lib/queries';
@@ -135,8 +136,23 @@ export default function CategoriesPage() {
                   <li key={category.id} className="flex items-center gap-3 px-5 py-3">
                     <CategoryIcon icon={category.icon} color={category.color} />
 
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-ink">{category.name}</p>
+                    {/*
+                      Chỉ phần tên + số đếm là link, KHÔNG phải cả dòng: nút Xoá
+                      nằm cùng dòng, mà lồng button trong link thì bấm Xoá cũng
+                      điều hướng theo.
+
+                      `from=&to=` là cố ý — trang giao dịch hiểu tham số rỗng là
+                      "không giới hạn kỳ". Số "N giao dịch" ở đây đếm từ đầu đến
+                      giờ, nên link theo tháng hiện tại sẽ ra ít hơn hẳn con số
+                      người dùng vừa bấm vào.
+                    */}
+                    <Link
+                      href={`/transactions?categoryId=${category.id}&from=&to=`}
+                      className="group min-w-0 flex-1"
+                    >
+                      <p className="truncate text-sm font-medium text-ink group-hover:underline">
+                        {category.name}
+                      </p>
                       <p className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
                         <span>{category.transactionCount ?? 0} giao dịch</span>
                         {(ruleCountByCategory.get(category.id) ?? 0) > 0 && (
@@ -145,7 +161,7 @@ export default function CategoriesPage() {
                           </Badge>
                         )}
                       </p>
-                    </div>
+                    </Link>
 
                     <Button
                       variant="danger"

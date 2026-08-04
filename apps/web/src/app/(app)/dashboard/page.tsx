@@ -358,7 +358,21 @@ export default function DashboardPage() {
                   <ErrorState error={breakdown.error} onRetry={() => void breakdown.refetch()} />
                 ) : (
                   <BreakdownBars
-                    items={breakdown.data.expense.map(categoryBar)}
+                    items={breakdown.data.expense.map((item) =>
+                      categoryBar(
+                        item,
+                        // Mục gộp "Chưa phân loại" (`categoryId` null) đi bằng
+                        // `uncategorized`, không phải `categoryId=null` — nếu
+                        // không thì nó rơi về "tất cả danh mục".
+                        txLink({
+                          type: 'expense',
+                          internal: 'exclude',
+                          ...(item.categoryId
+                            ? { categoryId: item.categoryId }
+                            : { uncategorized: 'true' }),
+                        }),
+                      ),
+                    )}
                     emptyLabel={`Chưa có khoản chi nào trong ${formatMonth(month).toLowerCase()}`}
                   />
                 )}
@@ -382,7 +396,21 @@ export default function DashboardPage() {
                   <ErrorState error={byAccount.error} onRetry={() => void byAccount.refetch()} />
                 ) : (
                   <BreakdownBars
-                    items={byAccount.data.expense.map(accountBar)}
+                    items={byAccount.data.expense.map((item) =>
+                      accountBar(
+                        item,
+                        // "Không rõ nguồn" (nhập tay, `accountId` null) KHÔNG có
+                        // link: không tồn tại filter "giao dịch không gắn nguồn",
+                        // nên link duy nhất dựng được sẽ ra một danh sách khác.
+                        item.accountId
+                          ? txLink({
+                              type: 'expense',
+                              internal: 'exclude',
+                              accountId: item.accountId,
+                            })
+                          : null,
+                      ),
+                    )}
                     emptyLabel="Import sao kê để thấy chi tiêu tách theo thẻ, tài khoản và ví"
                   />
                 )}

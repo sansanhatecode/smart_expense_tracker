@@ -17,7 +17,49 @@ Config đã có trong repo: [render.yaml](render.yaml) (blueprint cho api),
 
 ---
 
+## Bản deploy đang chạy
+
+| | |
+| :--- | :--- |
+| Web | https://expense-tracker-nine-lovat-73.vercel.app |
+| API | https://expense-tracker-api-6znm.onrender.com (`srv-d9oqk27qj5pc73871kh0`) |
+| DB | Neon `expense-tracker-db`, plan `free_v3`, `ap-southeast-1` |
+
+Nó **không** được dựng bằng blueprint như mục dưới, vì `console.neon.tech` không
+load được trong browser lúc đó. Đường đã dùng thật, ghi lại để lần sau không phải
+mò lại: Neon được provision qua **Vercel Marketplace**, tức không cần vào console
+Neon lần nào.
+
+```bash
+vercel integration add neon --plan free_v3 -m region=sin1 -m auth=false \
+  --name expense-tracker-db --no-env-pull
+```
+
+Nó set sẵn `DATABASE_URL` (pooled) và `DATABASE_URL_UNPOOLED` (direct) trên project
+Vercel — đúng hai thứ `DIRECT_URL` cần. Lấy ra bằng
+`vercel env pull <file> --environment=production`, rồi truyền vào Render.
+
+Service Render được tạo bằng `render services create` với đúng các flag tương ứng
+`render.yaml` (CLI không đọc được `render.yaml`; `render blueprints` chỉ validate).
+
+Hai chỗ CLI **không** làm được, phải bấm tay:
+
+- **Accept marketplace terms** của Neon: một lần, trên `vercel.com`.
+- **Sửa env var của service Render**: `render services update` không có flag
+  env-var. Phải vào [dashboard](https://dashboard.render.com/web/srv-d9oqk27qj5pc73871kh0/env)
+  hoặc gọi `PUT /v1/services/{id}/env-vars/{key}` của API Render.
+
+**Web chưa nối Git.** `vercel git connect` fail vì tài khoản Vercel chưa cài GitHub
+App. Hệ quả: push lên `main` thì **api tự deploy, web không**. Deploy web bằng
+`vercel deploy --prod` chạy từ root repo. Muốn web cũng tự deploy thì cài Vercel
+GitHub App rồi `vercel git connect`.
+
+---
+
 ## 1. Neon — tạo database
+
+Cách này cần `console.neon.tech` load được. Không load được thì dùng đường
+Marketplace ở mục trên.
 
 1. [console.neon.tech](https://console.neon.tech) → đăng ký bằng GitHub, **không nhập thẻ**.
 2. Create project: region **Singapore** (gần VN nhất), Postgres 16+.
@@ -159,8 +201,18 @@ không xảy ra.
 
 ## Deploy lần sau
 
-`git push` lên `main` → cả Vercel và Render tự build lại. Migration mới được
-`migrate deploy` chạy trong buildCommand của Render, không phải làm tay.
+```bash
+git push                                  # api tự build lại
+vercel deploy --prod                      # web: chạy từ ROOT repo, không phải apps/web
+```
 
-Migration lỗi thì build fail và Render giữ nguyên bản đang chạy — code mới không
-bao giờ gặp schema chưa kịp đổi.
+Web phải gọi tay vì project chưa nối Git (xem mục "Bản deploy đang chạy"). Chạy từ
+root là bắt buộc: Root Directory của project là `apps/web`, nên upload từ
+`apps/web` sẽ thành `apps/web/apps/web`.
+
+Migration mới được `migrate deploy` chạy trong buildCommand của Render, không phải
+làm tay. Migration lỗi thì build fail và Render giữ nguyên bản đang chạy — code mới
+không bao giờ gặp schema chưa kịp đổi.
+
+Đổi `NEXT_PUBLIC_API_URL` thì phải deploy lại web mới có tác dụng: nó được nhúng
+vào bundle lúc build, không đọc lúc chạy.

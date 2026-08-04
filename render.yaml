@@ -1,0 +1,60 @@
+# Blueprint cho apps/api trên Render (free plan). Xem DEPLOY.md để biết thứ tự
+# các bước, và §9.1 / §9.9 của spec để biết vì sao chọn Render.
+#
+# DB không khai báo ở đây một cách có chủ ý: Postgres free của Render HẾT HẠN sau
+# 30 ngày rồi bị xoá. Neon free là vĩnh viễn — nên DB nằm ngoài blueprint này và
+# chỉ được truyền vào qua DATABASE_URL / DIRECT_URL.
+
+services:
+  - type: web
+    name: expense-tracker-api
+    runtime: node
+    plan: free
+    # Singapore là region gần VN nhất trong số region Render có.
+    region: singapore
+
+    # `--include=dev` là bắt buộc, không phải cho chắc: NODE_ENV=production ở dưới
+    # áp dụng cho CẢ bước build, và khi đó `npm ci` bỏ devDependencies — tức không
+    # có @nestjs/cli, tsc, prisma. Build sẽ chết với lỗi "nest: not found".
+    #
+    # `build -w @expense/shared` phải đứng trước api: api import @expense/shared
+    # từ dist/, và dist/ không nằm trong git.
+    #
+    # `migrate deploy` là bước CUỐI: migration lỗi thì deploy fail và Render giữ
+    # nguyên bản đang chạy, thay vì bật code mới lên một schema chưa kịp đổi.
+    buildCommand: >-
+      npm ci --include=dev &&
+      npm run build -w @expense/shared &&
+      npm run build -w @expense/api &&
+      npm run db:deploy -w @expense/api
+
+    # Chạy từ root repo nên là apps/api/dist/main.js. Không có dist/src/ ở giữa —
+    # xem comment về `output` trong prisma/schema.prisma.
+    startCommand: node apps/api/dist/main.js
+
+    # /health có chạm DB thật, nên deploy chỉ được coi là thành công khi API nối
+    # được Neon — không phải khi process vừa mở port.
+    healthCheckPath: /health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Pin theo phiên bản dùng khi dev, để không bị Render đổi default dưới chân.
+      - key: NODE_VERSION
+        value: '24'
+
+      # Neon: DATABASE_URL là chuỗi pooled (có `-pooler`), DIRECT_URL là chuỗi
+      # direct. `migrate deploy` cần direct.
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+
+      # Origin của web trên Vercel. Chưa biết lúc tạo blueprint — điền sau khi
+      # Vercel deploy xong (xem DEPLOY.md bước 4).
+      - key: WEB_ORIGIN
+        sync: false
+
+      # Render sinh giá trị random 256-bit. Không cần tự chạy openssl.
+      - key: JWT_ACCESS_SECRET
+        generateValue: true

@@ -4,6 +4,8 @@ Quản lý chi tiêu cá nhân với **auto-import từ sao kê ngân hàng** (C
 
 Thiết kế và các quyết định kỹ thuật: [expense-tracker-technical-spec.md](expense-tracker-technical-spec.md) — mục §9 là ADR, ghi lại lý do của từng lựa chọn, gồm cả những quyết định đã bị lật và vì sao.
 
+Đưa lên production (Vercel + Render + Neon, 0đ, không cần thẻ): [DEPLOY.md](DEPLOY.md).
+
 ---
 
 ## Yêu cầu

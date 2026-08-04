@@ -2,7 +2,9 @@
 
 import {
   ArrowLeftRight,
+  Bug,
   ChartPie,
+  Heart,
   Landmark,
   LayoutDashboard,
   LogOut,
@@ -17,6 +19,8 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
+import { DonateDialog } from './donate-dialog';
+import { FeedbackDialog } from './feedback-dialog';
 import { Button } from './ui';
 
 const NAV = [
@@ -28,10 +32,31 @@ const NAV = [
   { href: '/categories', label: 'Danh mục', Icon: Tag },
 ];
 
+/**
+ * Class chung cho một dòng trong sidebar.
+ *
+ * Dòng điều hướng (`<Link>`) và dòng mở hộp thoại (`<button>`) phải trông y hệt
+ * nhau: với người dùng đó là cùng một danh sách, dù bên dưới là hai thẻ HTML khác
+ * nhau vì lý do accessibility (xem chú thích ButtonLink trong ui.tsx).
+ */
+const NAV_ROW =
+  'flex w-full items-center gap-2.5 px-2.5 py-2 text-sm font-medium transition-colors';
+
+const NAV_ROW_IDLE = 'text-ink-secondary hover:bg-surface hover:text-ink';
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
+  /** Hộp thoại đang mở, hoặc `null`. Hai cái không bao giờ mở cùng lúc. */
+  const [dialog, setDialog] = useState<'feedback' | 'donate' | null>(null);
+
+  // Mở hộp thoại từ menu mobile thì phải đóng menu, nếu không nó nằm dưới lớp
+  // backdrop của `<dialog>` và người dùng thấy hộp thoại trên một menu đang mở.
+  const openDialog = (which: 'feedback' | 'donate') => {
+    setMobileOpen(false);
+    setDialog(which);
+  };
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[15rem_1fr]">
@@ -73,12 +98,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   href={href}
                   onClick={() => setMobileOpen(false)}
                   aria-current={active ? 'page' : undefined}
-                  className={cn(
-                    'flex items-center gap-2.5 px-2.5 py-2 text-sm font-medium transition-colors',
-                    active
-                      ? 'bg-accent-soft text-ink'
-                      : 'text-ink-secondary hover:bg-surface hover:text-ink',
-                  )}
+                  className={cn(NAV_ROW, active ? 'bg-accent-soft text-ink' : NAV_ROW_IDLE)}
                   style={{ borderRadius: 'var(--radius-sm)' }}
                 >
                   <Icon aria-hidden className="size-4 shrink-0" />
@@ -89,9 +109,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </ul>
 
-        <div className="mt-6 space-y-2 border-t pt-4 lg:absolute lg:bottom-5 lg:left-3 lg:right-3 lg:mt-0">
+        <div className="mt-6 space-y-1 border-t pt-4 lg:absolute lg:bottom-5 lg:left-3 lg:right-3 lg:mt-0">
+          {/* Báo lỗi nằm ở sidebar chứ không ở một trang cụ thể: lỗi xảy ra ở
+              đâu thì phải báo được ngay từ đó, và form tự đính kèm trang đang
+              xem — bắt người dùng đi về dashboard để báo thì mất đúng thông tin
+              quý nhất. */}
+          <button
+            type="button"
+            onClick={() => openDialog('feedback')}
+            className={cn(NAV_ROW, NAV_ROW_IDLE)}
+            style={{ borderRadius: 'var(--radius-sm)' }}
+          >
+            <Bug aria-hidden className="size-4 shrink-0" />
+            Báo lỗi / góp ý
+          </button>
+          <button
+            type="button"
+            onClick={() => openDialog('donate')}
+            className={cn(NAV_ROW, NAV_ROW_IDLE)}
+            style={{ borderRadius: 'var(--radius-sm)' }}
+          >
+            <Heart aria-hidden className="size-4 shrink-0" />
+            Ủng hộ dev
+          </button>
+
           {user && (
-            <p className="truncate px-2.5 text-sm text-ink-muted" title={user.email}>
+            <p className="truncate px-2.5 pt-3 text-sm text-ink-muted" title={user.email}>
               {user.name ?? user.email}
             </p>
           )}
@@ -108,6 +151,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </nav>
 
       <main className="min-w-0 px-4 py-6 lg:px-8 lg:py-8">{children}</main>
+
+      {/* Mount ở đây, ngoài <nav>: hộp thoại phải sống cả khi menu mobile đã
+          đóng, nếu không thì bấm "Báo lỗi" trên điện thoại là menu đóng và hộp
+          thoại biến mất theo. */}
+      <FeedbackDialog open={dialog === 'feedback'} onClose={() => setDialog(null)} />
+      <DonateDialog open={dialog === 'donate'} onClose={() => setDialog(null)} />
     </div>
   );
 }

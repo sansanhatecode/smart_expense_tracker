@@ -63,6 +63,23 @@ const envSchema = z.object({
    * biết một endpoint chậm đang bắn bao nhiêu query (N+1 chẳng hạn).
    */
   LOG_SQL: z.stringbool().default(false),
+
+  /**
+   * Nơi nhận báo lỗi từ trong app: repo GitHub và token tạo issue.
+   *
+   * Cả hai đều OPTIONAL, và đó là điều kiện để không cấu hình gì cũng chạy được
+   * dev. Thiếu chúng thì endpoint /api/feedback trả 503 kèm lời nhắn "chưa cấu
+   * hình" — không phải chết lúc boot, vì báo lỗi không phải chức năng cốt lõi:
+   * cả app sập vì thiếu token báo lỗi thì thành ra chính nó là lỗi nặng nhất.
+   *
+   * Token cần scope hẹp nhất có thể: fine-grained PAT, chỉ repo này, chỉ quyền
+   * Issues: Read and write.
+   */
+  GITHUB_ISSUE_REPO: z
+    .string()
+    .regex(/^[\w.-]+\/[\w.-]+$/, "GITHUB_ISSUE_REPO phải có dạng 'owner/repo'")
+    .optional(),
+  GITHUB_ISSUE_TOKEN: z.string().min(1).optional(),
 });
 
 function parseEnv() {

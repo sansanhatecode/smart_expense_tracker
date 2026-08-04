@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { BudgetsModule } from './budgets/budgets.module';
 import { CategoriesModule } from './categories/categories.module';
+import { FeedbackModule } from './feedback/feedback.module';
 import { HealthController } from './health/health.controller';
 import { HealthRepository } from './health/health.repository';
 import { ImportsModule } from './imports/imports.module';
@@ -23,6 +24,7 @@ import { TransactionsModule } from './transactions/transactions.module';
     ImportsModule,
     StatsModule,
     BudgetsModule,
+    FeedbackModule,
     // Rate limit mặc định cho toàn API. Route auth siết chặt hơn bằng @Throttle
     // riêng, vì đó là chỗ bị brute-force.
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),

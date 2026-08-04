@@ -21,3 +21,4 @@ export * from './schemas/transaction';
 export * from './schemas/import';
 export * from './schemas/budget';
 export * from './schemas/stats';
+export * from './schemas/feedback';

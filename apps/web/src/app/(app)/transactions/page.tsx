@@ -12,7 +12,7 @@ import type {
 } from '@expense/shared';
 import { expandInternalFilter, formatVnd, parseVndInput } from '@expense/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search, Shuffle, Trash2, X } from 'lucide-react';
+import { CircleAlert, Plus, Search, Shuffle, Trash2, X } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
@@ -23,6 +23,7 @@ import {
   Button,
   Card,
   CategoryIcon,
+  ConfirmDialog,
   EmptyState,
   ErrorState,
   Field,
@@ -44,6 +45,15 @@ const PAGE_SIZE = 25;
  * gạch dưới hai đầu để không đụng id thật.
  */
 const NONE = '__none__';
+
+/**
+ * Thứ đang chờ xác nhận xoá.
+ *
+ * Giữ cả object giao dịch chứ không chỉ id: hộp xác nhận hiện mô tả, số tiền và
+ * ngày của dòng đó — đó là thứ để người dùng biết mình có đang xoá đúng dòng
+ * không, và là điều `confirm()` với một chuỗi không làm được.
+ */
+type DeleteTarget = { kind: 'one'; tx: TransactionDto } | { kind: 'bulk'; count: number };
 
 /** Danh sách tick → tham số id cho API, đã bỏ `NONE`. Rỗng → không gửi. */
 function idsParam(values: string[]): string | undefined {
@@ -171,6 +181,9 @@ function TransactionsView() {
    */
   const [selected, setSelected] = useState<string[]>([]);
 
+  /** Đang hỏi xoá cái gì. `null` = hộp xác nhận đang đóng. */
+  const [confirming, setConfirming] = useState<DeleteTarget | null>(null);
+
   const categories = useCategories();
   const queryClient = useQueryClient();
 
@@ -217,7 +230,11 @@ function TransactionsView() {
 
   const remove = useMutation({
     mutationFn: (id: string) => api.delete<void>(`/api/transactions/${id}`),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      setConfirming(null);
+    },
+    // Lỗi hiện trong hộp xác nhận, và hộp ở lại để bấm lại được — xem `deleteError`.
   });
 
   /**
@@ -242,9 +259,8 @@ function TransactionsView() {
       setSelected([]);
     },
     // API chặn lô lệch chiều thu/chi và message của nó nói được cách sửa, nên
-    // hiện thẳng ra thay vì thay bằng câu chung chung.
-    onError: (error) =>
-      alert(error instanceof ApiError ? error.message : 'Không gán được danh mục'),
+    // hiện thẳng ra thay vì thay bằng câu chung chung. Chỗ hiện là chính thanh
+    // hành động — xem prop `error` của BulkActions.
   });
 
   const bulkRemove = useMutation({
@@ -253,9 +269,22 @@ function TransactionsView() {
     onSuccess: () => {
       invalidate();
       setSelected([]);
+      setConfirming(null);
     },
-    onError: (error) => alert(error instanceof ApiError ? error.message : 'Không xoá được'),
   });
+
+  /**
+   * Mở hộp xác nhận. Xoá lỗi của lần trước trước khi mở: lỗi cũ còn nằm đó sẽ
+   * hiện ra ngay lúc hộp vừa mở, như thể lần này đã thất bại.
+   */
+  const askDelete = (target: DeleteTarget) => {
+    remove.reset();
+    bulkRemove.reset();
+    setConfirming(target);
+  };
+
+  const deleteBusy = remove.isPending || bulkRemove.isPending;
+  const deleteError = remove.error ?? bulkRemove.error;
 
   /**
    * Đổi filter thì luôn về trang 1 — giữ trang cũ có thể ra trang rỗng.
@@ -480,16 +509,18 @@ function TransactionsView() {
                   categories={categories.data ?? []}
                   selectedType={selectedType}
                   busy={bulkCategorize.isPending || bulkRemove.isPending}
-                  onCategorize={(categoryId) => bulkCategorize.mutate(categoryId)}
-                  onDelete={() => {
-                    if (
-                      confirm(
-                        `Xoá ${selected.length} giao dịch đã chọn? Việc này không hoàn lại được.`,
-                      )
-                    ) {
-                      bulkRemove.mutate();
-                    }
+                  error={
+                    bulkCategorize.error instanceof ApiError
+                      ? bulkCategorize.error.message
+                      : undefined
+                  }
+                  onCategorize={(categoryId) => {
+                    // Xoá lỗi lần trước trước khi thử lại, không thì người dùng
+                    // không phân biệt được lỗi cũ với kết quả lần này.
+                    bulkCategorize.reset();
+                    bulkCategorize.mutate(categoryId);
                   }}
+                  onDelete={() => askDelete({ kind: 'bulk', count: selected.length })}
                   onClear={() => setSelected([])}
                 />
               )}
@@ -590,11 +621,7 @@ function TransactionsView() {
                     size="sm"
                     aria-label={`Xoá ${tx.description}`}
                     disabled={remove.isPending}
-                    onClick={() => {
-                      if (confirm(`Xoá giao dịch "${tx.description}"?`)) {
-                        remove.mutate(tx.id);
-                      }
-                    }}
+                    onClick={() => askDelete({ kind: 'one', tx })}
                   >
                     <Trash2 aria-hidden className="size-4" />
                   </Button>
@@ -630,6 +657,49 @@ function TransactionsView() {
           </>
         )}
       </Card>
+
+      {/*
+        Một hộp cho cả hai đường xoá, không phải một hộp cho mỗi dòng: nội dung
+        khác nhau nhưng luôn chỉ có tối đa MỘT câu hỏi đang chờ trả lời, và
+        `confirming` chính là câu hỏi đó.
+      */}
+      <ConfirmDialog
+        open={confirming !== null}
+        title={
+          confirming?.kind === 'bulk'
+            ? `Xoá ${confirming.count} giao dịch?`
+            : 'Xoá giao dịch này?'
+        }
+        confirmLabel={
+          confirming?.kind === 'bulk' ? `Xoá ${confirming.count} giao dịch` : 'Xoá giao dịch'
+        }
+        busy={deleteBusy}
+        error={deleteError instanceof ApiError ? deleteError.message : undefined}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          if (confirming?.kind === 'one') remove.mutate(confirming.tx.id);
+          else if (confirming?.kind === 'bulk') bulkRemove.mutate();
+        }}
+      >
+        {confirming?.kind === 'one' && (
+          <>
+            {/* Mô tả, số tiền và ngày: đủ để nhận ra có đúng dòng mình định xoá
+                không. Danh sách có thể có nhiều dòng mô tả giống nhau. */}
+            <p className="font-medium text-ink">{confirming.tx.description}</p>
+            <p className="tabular">
+              {confirming.tx.type === 'income' ? '+' : '−'}
+              {formatVnd(confirming.tx.amount)} · {formatDate(confirming.tx.date)}
+              {confirming.tx.account ? ` · ${confirming.tx.account.name}` : ''}
+            </p>
+          </>
+        )}
+        <p>
+          {confirming?.kind === 'bulk'
+            ? 'Toàn bộ các giao dịch đang tick sẽ bị xoá. '
+            : ''}
+          Không hoàn lại được. Thống kê và ngân sách sẽ tính lại theo dữ liệu còn lại.
+        </p>
+      </ConfirmDialog>
     </div>
   );
 }
@@ -649,6 +719,7 @@ function BulkActions({
   categories,
   selectedType,
   busy,
+  error,
   onCategorize,
   onDelete,
   onClear,
@@ -658,6 +729,8 @@ function BulkActions({
   /** null = lô trộn cả thu lẫn chi. */
   selectedType: TxType | null;
   busy: boolean;
+  /** Lỗi của lần gán vừa rồi, hiện ngay trong thanh này. */
+  error?: string;
   onCategorize: (categoryId: string | null) => void;
   onDelete: () => void;
   onClear: () => void;
@@ -703,6 +776,18 @@ function BulkActions({
       <Button variant="ghost" size="sm" disabled={busy} onClick={onClear}>
         Bỏ chọn
       </Button>
+
+      {/*
+        Lỗi ở ngay cạnh select vừa bấm, không phải trong một hộp alert phải tắt
+        đi mới đọc tiếp được: lô vẫn đang chọn, nên việc cần làm sau khi đọc lỗi
+        là bấm lại select — và nó phải còn nhìn thấy được lúc đó.
+      */}
+      {error && (
+        <p className="flex w-full items-start gap-1.5 text-sm text-critical" role="alert">
+          <CircleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+          {error}
+        </p>
+      )}
     </div>
   );
 }

@@ -13,6 +13,7 @@ import {
   Button,
   Card,
   CardHeader,
+  ConfirmDialog,
   EmptyState,
   ErrorState,
   Field,
@@ -26,6 +27,8 @@ const MONTH_OPTIONS = { count: 12, ahead: 1 };
 
 export default function BudgetsPage() {
   const [month, setMonth] = useState(currentMonthKey());
+  /** Ngân sách đang chờ xác nhận xoá. `null` = hộp xác nhận đang đóng. */
+  const [confirming, setConfirming] = useState<BudgetDto | null>(null);
   const queryClient = useQueryClient();
   const categories = useCategories();
 
@@ -40,7 +43,11 @@ export default function BudgetsPage() {
 
   const remove = useMutation({
     mutationFn: (id: string) => api.delete<void>(`/api/budgets/${id}`),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      setConfirming(null);
+    },
+    // Lỗi hiện trong hộp xác nhận và hộp ở lại để bấm lại được.
   });
 
   // Chỉ danh mục CHI mới đặt được ngân sách — API cũng từ chối danh mục thu
@@ -113,9 +120,9 @@ export default function BudgetsPage() {
                     aria-label={`Xoá ngân sách ${budget.category.name}`}
                     disabled={remove.isPending}
                     onClick={() => {
-                      if (confirm(`Xoá ngân sách cho "${budget.category.name}"?`)) {
-                        remove.mutate(budget.id);
-                      }
+                      // Xoá lỗi lần trước, không thì nó hiện ngay lúc hộp vừa mở.
+                      remove.reset();
+                      setConfirming(budget);
                     }}
                   >
                     <Trash2 aria-hidden className="size-4" />
@@ -126,6 +133,29 @@ export default function BudgetsPage() {
           )}
         </div>
       </Card>
+
+      {/*
+        Xoá ngân sách KHÔNG chạm vào giao dịch — nói thẳng điều đó. Nút Xoá nằm
+        cạnh thanh đo mức chi, nên nỗi lo hợp lý ở đây là "xoá luôn khoản đã chi
+        à?", và câu trả lời phải có trước khi bấm.
+      */}
+      <ConfirmDialog
+        open={confirming !== null}
+        title={confirming ? `Xoá ngân sách cho "${confirming.category.name}"?` : ''}
+        confirmLabel="Xoá ngân sách"
+        busy={remove.isPending}
+        error={remove.error instanceof ApiError ? remove.error.message : undefined}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => confirming && remove.mutate(confirming.id)}
+      >
+        {confirming && (
+          <p>
+            Hạn mức {formatVnd(confirming.limitAmount)} của {formatMonth(month)} sẽ bị bỏ. Giao
+            dịch và số đã chi {formatVnd(confirming.spent)} không bị ảnh hưởng — chỉ mất phần
+            theo dõi hạn mức.
+          </p>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }

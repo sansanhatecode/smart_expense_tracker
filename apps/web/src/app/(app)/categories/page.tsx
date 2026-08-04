@@ -13,6 +13,7 @@ import {
   Card,
   CardHeader,
   CategoryIcon,
+  ConfirmDialog,
   EmptyState,
   ErrorState,
   Field,
@@ -42,6 +43,8 @@ const ICONS = [
 
 export default function CategoriesPage() {
   const [showForm, setShowForm] = useState(false);
+  /** Danh mục đang chờ xác nhận xoá. `null` = hộp xác nhận đang đóng. */
+  const [confirming, setConfirming] = useState<CategoryDto | null>(null);
   const categories = useCategories();
   const queryClient = useQueryClient();
 
@@ -56,19 +59,22 @@ export default function CategoriesPage() {
     void queryClient.invalidateQueries({ queryKey: ['stats'] });
   };
 
+  /**
+   * Hậu quả của việc xoá được nói TRƯỚC, trong hộp xác nhận, nên ở đây không báo
+   * lại lần nữa: giao dịch chuyển sang "chưa phân loại" là điều người dùng vừa
+   * đọc và vừa đồng ý, và bắt họ tắt thêm một hộp nữa để xác nhận điều đó không
+   * thêm thông tin gì.
+   *
+   * Lỗi thì ngược lại — nó hiện TRONG hộp và hộp ở lại để bấm lại được, nên
+   * không có onError ở đây.
+   */
   const remove = useMutation({
     mutationFn: (id: string) =>
       api.delete<{ untaggedTransactions: number }>(`/api/categories/${id}`),
-    onSuccess: (result) => {
+    onSuccess: () => {
       invalidate();
-      // Nói rõ điều đã xảy ra: giao dịch KHÔNG bị xoá, chỉ mất phân loại
-      if (result.untaggedTransactions > 0) {
-        alert(
-          `Đã xoá danh mục. ${result.untaggedTransactions} giao dịch chuyển sang "chưa phân loại" — không giao dịch nào bị xoá.`,
-        );
-      }
+      setConfirming(null);
     },
-    onError: (error) => alert(error instanceof ApiError ? error.message : 'Không xoá được'),
   });
 
   const ruleCountByCategory = new Map<string, number>();
@@ -78,6 +84,10 @@ export default function CategoriesPage() {
       (ruleCountByCategory.get(rule.category.id) ?? 0) + 1,
     );
   }
+
+  // Tính ngoài JSX để hộp xác nhận không phải lồng điều kiện cho từng câu.
+  const confirmingTxCount = confirming?.transactionCount ?? 0;
+  const confirmingRuleCount = confirming ? ruleCountByCategory.get(confirming.id) ?? 0 : 0;
 
   const grouped: Array<{ type: TxType; label: string; items: CategoryDto[] }> = [
     {
@@ -169,12 +179,10 @@ export default function CategoriesPage() {
                       aria-label={`Xoá ${category.name}`}
                       disabled={remove.isPending}
                       onClick={() => {
-                        const count = category.transactionCount ?? 0;
-                        const message =
-                          count > 0
-                            ? `Xoá "${category.name}"? ${count} giao dịch sẽ chuyển sang "chưa phân loại" (không bị xoá).`
-                            : `Xoá "${category.name}"?`;
-                        if (confirm(message)) remove.mutate(category.id);
+                        // Xoá lỗi của lần trước: để lại thì nó hiện ra ngay lúc
+                        // hộp vừa mở, như thể lần này đã thất bại.
+                        remove.reset();
+                        setConfirming(category);
                       }}
                     >
                       <Trash2 aria-hidden className="size-4" />
@@ -186,6 +194,33 @@ export default function CategoriesPage() {
           </Card>
         ))
       )}
+
+      {/*
+        Hộp xác nhận nói ĐỦ hậu quả, gồm cả thứ `confirm()` cũ bỏ sót: rule tự
+        phân loại bị xoá theo danh mục (FK là onDelete: Cascade) và không dựng
+        lại được, khác với giao dịch chỉ mất phân loại.
+      */}
+      <ConfirmDialog
+        open={confirming !== null}
+        title={confirming ? `Xoá danh mục "${confirming.name}"?` : ''}
+        confirmLabel="Xoá danh mục"
+        busy={remove.isPending}
+        error={remove.error instanceof ApiError ? remove.error.message : undefined}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => confirming && remove.mutate(confirming.id)}
+      >
+        <p>
+          {confirmingTxCount > 0
+            ? `${confirmingTxCount} giao dịch sẽ chuyển sang "chưa phân loại". Không giao dịch nào bị xoá.`
+            : 'Danh mục này chưa có giao dịch nào.'}
+        </p>
+        {confirmingRuleCount > 0 && (
+          <p>
+            {confirmingRuleCount} rule tự phân loại của danh mục này bị xoá theo và không hoàn
+            lại được — lần import sau sẽ không tự gán danh mục này nữa.
+          </p>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }

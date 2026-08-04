@@ -35,6 +35,7 @@ import type {
   UploadedFile,
 } from './types';
 import { toCategorySummary, toDateOnly, toMoney, toNullableMoney } from '../common/mappers';
+import type { TxType } from '../generated/prisma/enums';
 import { env } from '../config/env';
 
 /** Batch pending cũ hơn mốc này bị dọn — người dùng đã bỏ giữa đường. */
@@ -187,14 +188,16 @@ export class ImportsService {
   ): Promise<StagedRowDto> {
     await this.assertPendingBatch(userId, batchId);
 
-    if (input.categoryId) {
-      await this.assertOwnsCategory(userId, input.categoryId);
-    }
-
+    // Tìm dòng TRƯỚC khi kiểm danh mục: cần `type` của nó mới biết danh mục có
+    // đúng chiều không.
     const existing = await this.imports.findStagedRow(batchId, rowId);
 
     if (!existing) {
       throw new NotFoundException('Không tìm thấy dòng này trong batch');
+    }
+
+    if (input.categoryId) {
+      await this.assertOwnsCategory(userId, input.categoryId, existing.type);
     }
 
     const row = await this.imports.updateStagedRow(rowId, {
@@ -214,7 +217,32 @@ export class ImportsService {
     await this.assertPendingBatch(userId, batchId);
 
     if (input.categoryId) {
-      await this.assertOwnsCategory(userId, input.categoryId);
+      const category = await this.assertOwnsCategory(userId, input.categoryId);
+
+      /*
+       * Chặn cả lô khi có dòng lệch chiều, giống `bulkCategorize` ở
+       * transactions.service và vì đúng lý do đó: gán một phần rồi trả về
+       * `updated` nhỏ hơn số đã chọn là thứ người dùng không nhìn thấy, và họ sẽ
+       * tin là đã gán xong.
+       *
+       * Ở đây không kiểm được bằng `assertOwnsCategory` như đường một dòng, vì
+       * lô có thể trộn cả dòng thu lẫn dòng chi — phải đếm.
+       */
+      const mismatched = await this.imports.countMismatchedType(
+        batchId,
+        input.rowIds,
+        category.type,
+      );
+
+      if (mismatched > 0) {
+        const categoryDirection = category.type === 'income' ? 'thu' : 'chi';
+        const rowDirection = category.type === 'income' ? 'chi' : 'thu';
+
+        throw new BadRequestException(
+          `${mismatched} dòng đã chọn là giao dịch ${rowDirection}, không gán được vào ` +
+            `danh mục ${categoryDirection} "${category.name}". Bỏ chọn những dòng ${rowDirection} rồi thử lại.`,
+        );
+      }
     }
 
     const updated = await this.imports.updateStagedRows(batchId, input.rowIds, {
@@ -417,12 +445,38 @@ export class ImportsService {
     }
   }
 
-  private async assertOwnsCategory(userId: string, categoryId: string): Promise<void> {
+  /**
+   * Danh mục phải thuộc user, và nếu biết chiều của dòng thì phải khớp chiều đó.
+   *
+   * Bước preview trước đây chỉ kiểm sở hữu, nên nó là đường vòng qua quy tắc mà
+   * transactions.service chặn rất kỹ: gán danh mục thu cho một dòng chi ở đây thì
+   * `confirm` ghi thẳng vào `Transaction` bằng `createMany`, không đi qua
+   * transactions.service một bước nào. UI đã lọc theo chiều rồi, nhưng UI không
+   * phải là ranh giới — API mới là.
+   *
+   * Trả về danh mục để chỗ gọi dùng tiếp `type`/`name` mà không phải truy vấn lại.
+   */
+  private async assertOwnsCategory(
+    userId: string,
+    categoryId: string,
+    type?: TxType,
+  ): Promise<{ id: string; type: TxType; name: string }> {
     const category = await this.imports.findOwnedCategory(userId, categoryId);
 
     if (!category) {
       throw new NotFoundException('Không tìm thấy danh mục');
     }
+
+    // 404 giống đường gán từng giao dịch ở transactions.service, để hai đường nói
+    // cùng một thứ tiếng khi người dùng chọn nhầm danh mục.
+    if (type && category.type !== type) {
+      throw new NotFoundException(
+        `Danh mục "${category.name}" là danh mục ${category.type === 'income' ? 'thu' : 'chi'}, ` +
+          `không dùng được cho giao dịch ${type === 'income' ? 'thu' : 'chi'}`,
+      );
+    }
+
+    return category;
   }
 
   private async buildPreview(

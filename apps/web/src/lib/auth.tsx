@@ -33,11 +33,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const queryClient = useQueryClient();
-  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const clearTimer = useCallback(() => {
     if (refreshTimer.current) {
-      clearTimeout(refreshTimer.current);
+      clearInterval(refreshTimer.current);
       refreshTimer.current = null;
     }
   }, []);
@@ -48,19 +48,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * Chủ động refresh thay vì chờ 401: nếu chờ, mỗi lần token hết hạn sẽ có một
    * loạt request thất bại rồi retry — người dùng thấy màn hình nhấp nháy. API
    * client vẫn xử lý 401 như lưới an toàn cho trường hợp máy vừa thức khỏi sleep.
+   *
+   * `setInterval` chứ không phải `setTimeout` tự hẹn lại: mỗi lần refresh đều
+   * hẹn lại theo ĐÚNG khoảng cũ (đường này không biết hạn mới), nên nó vốn là
+   * một interval. Viết bằng đệ quy thì hàm phải tự tham chiếu chính mình bên
+   * trong `useCallback` của nó — thứ mà `react-hooks/immutability` chặn, và
+   * chặn có lý: closure bắt lấy binding của lần render tạo ra nó.
    */
   const scheduleRefresh = useCallback(
     (expiresIn: number) => {
       clearTimer();
       const delayMs = Math.max(5, expiresIn - REFRESH_MARGIN_SECONDS) * 1000;
 
-      refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = setInterval(() => {
         void (async () => {
           const ok = await restoreSession();
-          if (ok) {
-            // Không biết hạn mới nên hẹn lại theo cùng khoảng
-            scheduleRefresh(expiresIn);
-          } else {
+          if (!ok) {
+            clearTimer();
             setUser(null);
             router.replace('/login');
           }

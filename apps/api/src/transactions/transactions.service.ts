@@ -96,8 +96,29 @@ export class TransactionsService {
       throw new NotFoundException('Không tìm thấy giao dịch');
     }
 
+    /*
+     * Chiều tiền và danh mục SAU khi patch phải khớp nhau — và điều đó phải tính
+     * trên giá trị sau, không phải trên field nào được gửi lên.
+     *
+     * Kiểm tra cũ nằm gọn trong `if (input.categoryId)`, nên `PATCH { type }` một
+     * mình lọt qua: nó đổi chiều giao dịch mà để nguyên danh mục cũ, và một khoản
+     * chi nằm trong danh mục thu là đúng thứ mà `assertOwnsCategory` sinh ra để
+     * chặn. Hậu quả im lặng: `/stats/by-category` group theo (danh mục, chiều) nên
+     * hiện danh mục chi trong khối thu, còn ngân sách lọc `type = 'expense'` thì
+     * đánh rơi nó — hai chỗ lệch nhau mà không có gì báo.
+     */
+    const nextType = input.type ?? existing.type;
+
     if (input.categoryId) {
-      await this.assertOwnsCategory(userId, input.categoryId, input.type ?? existing.type);
+      await this.assertOwnsCategory(userId, input.categoryId, nextType);
+    } else if (
+      // Giữ nguyên danh mục cũ mà chiều lại đổi — nhánh trước đây không có.
+      // `PATCH { description }` không rơi vào đây, nên sửa mô tả vẫn là một query.
+      input.categoryId === undefined &&
+      existing.categoryId !== null &&
+      nextType !== existing.type
+    ) {
+      await this.assertKeptCategoryMatchesType(userId, existing.categoryId, nextType);
     }
 
     if (input.accountId) {
@@ -260,6 +281,36 @@ export class TransactionsService {
     }
 
     return category;
+  }
+
+  /**
+   * Danh mục ĐANG GIỮ phải còn hợp lệ sau khi đổi chiều giao dịch.
+   *
+   * 400 chứ không phải 404 như đường chọn danh mục — cùng lý lẽ với `bulkCategorize`:
+   * ở đây danh mục có tồn tại và thuộc về người dùng, cái sai là tổ hợp sau khi
+   * sửa. Message phải nói được cách thoát, vì người dùng chỉ định đổi chiều thu/chi
+   * và không nghĩ là mình đang đụng tới danh mục.
+   */
+  private async assertKeptCategoryMatchesType(
+    userId: string,
+    categoryId: string,
+    type: TxType,
+  ): Promise<void> {
+    const category = await this.transactions.findOwnedCategory(userId, categoryId);
+
+    // Danh mục bị xoá song song thì FK đã set null; không còn gì để kiểm.
+    if (!category || category.type === type) {
+      return;
+    }
+
+    const rowDirection = type === 'income' ? 'thu' : 'chi';
+    const categoryDirection = category.type === 'income' ? 'thu' : 'chi';
+
+    throw new BadRequestException(
+      `Đổi thành giao dịch ${rowDirection} thì danh mục "${category.name}" không còn dùng được, ` +
+        `vì đó là danh mục ${categoryDirection}. Gửi kèm danh mục ${rowDirection} mới, ` +
+        `hoặc đặt danh mục về rỗng để chuyển giao dịch này sang "chưa phân loại".`,
+    );
   }
 
   /** Chặn việc gắn giao dịch vào nguồn tiền của user khác bằng cách nhồi id lạ. */

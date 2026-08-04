@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Push liên tiếp lên cùng branch thì chỉ chạy lần cuối — không có lý do trả tiền
+# CI cho một commit đã bị thay thế.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # `prisma generate` phải chạy trước typecheck: apps/api import type từ
+      # src/generated/prisma, và thư mục đó không nằm trong git.
+      #
+      # DATABASE_URL là chuỗi giả và không có Postgres nào ở đây: `generate` chỉ
+      # đọc schema, không mở kết nối. Đặt nó vì prisma.config.ts đọc biến này và
+      # ở CI thì không có .env để dotenv nạp — không phải vì cần một DB thật.
+      - name: Generate Prisma client
+        run: npx prisma generate
+        working-directory: apps/api
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+
+      # Ba bước dưới đây chạy TUẦN TỰ một cách có chủ ý. Cả `typecheck` lẫn
+      # `test` đều bắt đầu bằng `npm run build -w @expense/shared`, tức cùng ghi
+      # vào packages/shared/dist. Chạy song song thì hai tiến trình tsc ghi đè
+      # nhau trong khi test đang import từ đó — lỗi sẽ là flaky, không lặp lại
+      # được, và tốn nhiều giờ để tìm ra.
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      - run: npm test

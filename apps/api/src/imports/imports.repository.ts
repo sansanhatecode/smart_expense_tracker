@@ -194,10 +194,27 @@ export class ImportsRepository {
     await this.prisma.importBatch.delete({ where: { id: batchId } });
   }
 
-  findStagedRow(batchId: string, rowId: string): Promise<{ id: string } | null> {
+  /** Trả kèm `type`: service cần chiều tiền của dòng để kiểm danh mục được gán. */
+  findStagedRow(
+    batchId: string,
+    rowId: string,
+  ): Promise<{ id: string; type: TxType } | null> {
     return this.prisma.stagedTransaction.findFirst({
       where: { id: rowId, batchId },
-      select: { id: true },
+      select: { id: true, type: true },
+    });
+  }
+
+  /**
+   * Đếm trong danh sách có bao nhiêu dòng staging KHÁC chiều `type`.
+   *
+   * Bản sao của `countMismatchedType` ở transactions.repository, cho bước preview.
+   * Đếm ở DB thay vì kéo cả lô về: danh sách có thể tới 1000 id, mà câu trả lời
+   * cần chỉ là một số.
+   */
+  countMismatchedType(batchId: string, rowIds: string[], type: TxType): Promise<number> {
+    return this.prisma.stagedTransaction.count({
+      where: { id: { in: rowIds }, batchId, type: { not: type } },
     });
   }
 
@@ -369,10 +386,14 @@ export class ImportsRepository {
     });
   }
 
-  findOwnedCategory(userId: string, categoryId: string): Promise<{ id: string } | null> {
+  /** Trả kèm `type`/`name`: service cần cả hai để kiểm chiều và viết message cụ thể. */
+  findOwnedCategory(
+    userId: string,
+    categoryId: string,
+  ): Promise<{ id: string; type: TxType; name: string } | null> {
     return this.prisma.category.findFirst({
       where: { id: categoryId, userId },
-      select: { id: true },
+      select: { id: true, type: true, name: true },
     });
   }
 

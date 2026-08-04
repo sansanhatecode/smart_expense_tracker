@@ -55,6 +55,11 @@ export interface TransactionPatch {
 export interface OwnedTransaction {
   id: string;
   type: TxType;
+  /**
+   * Cần cho lúc sửa: `PATCH { type }` một mình cũng đổi chiều giao dịch, và
+   * service phải biết danh mục đang giữ là gì mới kiểm được chiều sau khi patch.
+   */
+  categoryId: string | null;
 }
 
 export interface OwnedCategory {
@@ -131,7 +136,7 @@ export class TransactionsRepository {
   findOwned(userId: string, id: string): Promise<OwnedTransaction | null> {
     return this.prisma.transaction.findFirst({
       where: { id, userId },
-      select: { id: true, type: true },
+      select: { id: true, type: true, categoryId: true },
     });
   }
 

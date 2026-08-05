@@ -1,6 +1,6 @@
 # Technical Specification — Smart Expense Tracker
 
-Ứng dụng quản lý chi tiêu cá nhân với **auto-import** từ CSV / sao kê ngân hàng (Excel, PDF), thống kê & ngân sách. Fullstack, chi phí **0đ** (free tier).
+Ứng dụng quản lý chi tiêu cá nhân với **auto-import** từ CSV / sao kê ngân hàng (Excel, PDF), thống kê & ngân sách.
 
 > **v3** — sửa 7 quyết định data model / luồng import so với v1, và **giữ kiến trúc tách FE/BE** (v2 từng đề xuất gộp thành một app Next.js; xem ADR 9.1 để biết vì sao quay lại tách). Lý do từng thay đổi ghi ở §9 (ADR).
 
@@ -18,7 +18,7 @@ Người dùng theo dõi thu–chi mà **không phải nhập tay**: kéo dữ l
 - Dashboard: tổng thu/chi/số dư, biểu đồ theo danh mục & theo thời gian.
 - Budget theo danh mục/tháng + cảnh báo ngưỡng.
 
-**Ràng buộc:** chỉ dùng free tier, **0đ tuyệt đối**. Không link thẻ ngân hàng thật (không khả thi cho dev cá nhân ở VN hiện tại) — thay bằng import file.
+**Ràng buộc:** không link thẻ ngân hàng thật (không khả thi cho dev cá nhân ở VN hiện tại) — thay bằng import file.
 
 ---
 
@@ -46,12 +46,8 @@ packages/shared   Zod + types            → cả hai đầu import
 | File parse | papaparse (CSV), **read-excel-file** (.xlsx), pdfjs-dist (mở rộng) | `xlsx` trên npm đã bỏ rơi + có CVE; `exceljs` kéo 76 dep và mang theo vuln — xem §9.2 |
 | Money | `BigInt` (số nguyên VND) | VND không có đơn vị nhỏ hơn đồng — xem §9.3 |
 | Test | **Vitest** | ESM native, ít config với TS |
-| Deploy | **Vercel (web) + Render (api) + Neon (DB)** | 0đ. Đánh đổi: Render free sleep — xem ADR 9.9 |
+| Deploy | **Vercel (web) + Render (api) + Neon (DB)** | Đánh đổi: Render free sleep — xem ADR 9.9 |
 | CI/CD | GitHub Actions (lint + typecheck + test), `services: postgres` cho integration | |
-
-**Không chọn Railway:** đã bỏ free tier từ 2023, và bỏ prepaid credit đầu 2026 — chỉ còn $5 trial 30 ngày.
-
-**Không chọn Supabase:** free project tự pause sau 7 ngày không có request và phải vào dashboard unpause bằng tay. Neon thì scale-to-zero rồi tự wake.
 
 ---
 
@@ -320,7 +316,7 @@ Vì API là Node long-running (Render) chứ không phải serverless, route imp
 - Vượt ngân sách → có cảnh báo.
 - Có test cho parser, normalizer, dedupe, và stats aggregation.
 - IDOR: user A không truy cập được resource của user B (404).
-- Deploy chạy được trên free tier: web trên Vercel, api trên Render, DB trên Neon — tổng 0đ.
+- Deploy chạy được: web trên Vercel, api trên Render, DB trên Neon.
 - FE gọi được API qua CORS với cookie (không lỗi preflight, refresh cookie được set và gửi lại đúng).
 - Dùng lại refresh token đã revoke → toàn bộ family bị revoke, phải login lại.
 
@@ -338,11 +334,9 @@ PDF parser cho sao kê PDF · LLM insight ("tháng này tiêu cà phê nhiều h
 
 Đây là quyết định đã lật một lần, nên ghi lại cả hai chiều.
 
-**Lập luận cho việc gộp** (v2 của tài liệu này): ràng buộc là 0đ tuyệt đối và app phải dùng được hàng ngày. Không nền tảng nào còn cho chạy Node backend always-on miễn phí — Railway bỏ free tier từ 2023, Render free sleep sau 15 phút idle với spin-up ~1 phút. Phần khó về kỹ thuật của dự án là import pipeline / dedupe / SQL aggregation, không phải boilerplate DI của NestJS. Gộp lại thì được: một deploy, không CORS, cookie session chạy đúng, Zod share miễn phí.
+**Lập luận cho việc gộp** (v2 của tài liệu này): phần khó về kỹ thuật của dự án là import pipeline / dedupe / SQL aggregation, không phải boilerplate DI của NestJS. Gộp lại thì được: một deploy, không CORS, cookie session chạy đúng, Zod share miễn phí.
 
 **Lý do vẫn chọn tách:** mục tiêu của dự án không chỉ là cái app — nó còn là hiện vật cho phỏng vấn. Một backend NestJS độc lập với thiết kế API rõ ràng là thứ kể được, và ranh giới FE/BE thật buộc mọi contract phải tường minh thay vì lẫn vào import trực tiếp.
-
-**Cái giá, nói thẳng:** Render free sleep 15 phút → mỗi tối mở app phải chờ ~60s cho request đầu. Đây là xung đột thật với mục tiêu "dùng hàng ngày", và nó được chấp nhận có ý thức, không phải bỏ qua. Xem ADR 9.9 cho đường thoát.
 
 **Điều làm cho quyết định này không đắt:** kiến trúc code giống hệt nhau dù deploy kiểu nào. `apps/api` là NestJS thường, nên chuyển giữa Render (long-running) và serverless chỉ là đổi entry point, không đụng domain layer. Việc tách hay gộp là quyết định muộn và rẻ — điều đắt là data model, và phần đó đã chốt độc lập với chuyện này.
 
@@ -427,10 +421,10 @@ Hai nguyên tắc rút ra:
 
 ### 9.9. Cold start của Render: biết trước, và có đường thoát
 
-ADR 9.1 chấp nhận Render free sleep 15 phút. Ghi lại ở đây các lựa chọn khi cái giá đó trở nên không chịu được, để lúc đó không phải suy nghĩ lại từ đầu:
+ADR 9.1 chấp nhận Render free sleep 15 phút. Ghi lại ở đây lựa chọn khi cold start trở nên không chịu được, để lúc đó không phải suy nghĩ lại từ đầu:
 
-1. **Deploy `apps/api` lên Vercel serverless** (một Vercel project thứ hai). Vẫn 0đ, vẫn hai origin, vẫn NestJS — chỉ thêm một entry point wrap Nest app thành handler. Cold start còn ~1s thay vì ~60s. Đánh đổi: quay lại giới hạn 4.5MB body / 60s timeout, và mất khả năng chạy cron/queue trong process.
-2. **Trả ~$5/tháng** cho Fly.io hoặc một VPS. Hết cold start, không giới hạn serverless. Đây là câu trả lời sạch nhất và cũng là lý do nó được liệt kê — "0đ" là ràng buộc tự đặt, không phải định luật.
-3. **Ping định kỳ để giữ thức** — cố tình *không* chọn. Nó lách quota của nhà cung cấp, đốt 750 instance-hours/tháng của Render vào việc không làm gì, và vẫn chết khi hết giờ. Giải pháp giả.
+**Deploy `apps/api` lên nền serverless** (ví dụ thêm một Vercel project thứ hai). Vẫn hai origin, vẫn NestJS — chỉ thêm một entry point wrap Nest app thành handler. Cold start còn ~1s thay vì ~60s. Đánh đổi: quay lại giới hạn 4.5MB body / 60s timeout, và mất khả năng chạy cron/queue trong process.
 
-Điều làm cả ba đường này đều rẻ: `apps/api` không phụ thuộc vào cách nó được host. Domain layer không biết mình đang chạy trong `main.ts` hay trong một serverless handler.
+**Ping định kỳ để giữ thức** — cố tình *không* chọn. Nó chỉ trì hoãn triệu chứng, không loại bỏ cold start, và service vẫn có thể ngủ theo cách khác ngoài tầm kiểm soát.
+
+Điều làm đường thoát này rẻ: `apps/api` không phụ thuộc vào cách nó được host. Domain layer không biết mình đang chạy trong `main.ts` hay trong một serverless handler.

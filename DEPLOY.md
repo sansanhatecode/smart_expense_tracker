@@ -1,16 +1,10 @@
-# Deploy — 0đ, không thẻ
+# Deploy
 
-| Phần | Nền tảng | Free plan |
-| :--- | :--- | :--- |
-| `apps/web` | Vercel Hobby | 100 GB bandwidth, 1M request, 100 phút build / tháng |
-| `apps/api` | Render free web service | 750 instance-hours / tháng, sleep sau 15 phút idle |
-| Postgres | Neon free | 0.5 GB / project, 100 CU-hours / tháng, vĩnh viễn (không phải trial) |
-
-Lý do chọn ba chỗ này: §9.1 của [spec](expense-tracker-technical-spec.md). Đường
-thoát khi cold start của Render trở nên không chịu được: ADR 9.9.
-
-**Không chỗ nào cần thẻ.** Xem [Vì sao không phát sinh phí](#vì-sao-không-phát-sinh-phí)
-ở dưới trước khi bấm gì.
+| Phần | Nền tảng |
+| :--- | :--- |
+| `apps/web` | Vercel |
+| `apps/api` | Render |
+| Postgres | Neon |
 
 Config đã có trong repo: [render.yaml](render.yaml) (blueprint cho api),
 [apps/web/vercel.json](apps/web/vercel.json) (build command cho monorepo).
@@ -49,10 +43,19 @@ Hai chỗ CLI **không** làm được, phải bấm tay:
   env-var. Phải vào [dashboard](https://dashboard.render.com/web/srv-d9oqk27qj5pc73871kh0/env)
   hoặc gọi `PUT /v1/services/{id}/env-vars/{key}` của API Render.
 
-**Web chưa nối Git.** `vercel git connect` fail vì tài khoản Vercel chưa cài GitHub
-App. Hệ quả: push lên `main` thì **api tự deploy, web không**. Deploy web bằng
-`vercel deploy --prod` chạy từ root repo. Muốn web cũng tự deploy thì cài Vercel
-GitHub App rồi `vercel git connect`.
+**Web đã nối Git.** Cài Vercel GitHub App rồi chạy `vercel git connect` — giờ push
+lên `main` thì **cả api và web tự deploy**, không cần `vercel deploy --prod` tay
+nữa.
+
+CI (`ci.yml`) và hai CD này chạy **độc lập, không cái nào đợi cái nào**: Render và
+Vercel deploy trực tiếp từ event push, không đợi GitHub Actions pass. Một commit
+làm fail lint/typecheck/test vẫn có thể đã lên production ở cả hai nơi trước khi
+Actions kịp báo đỏ.
+
+Nối Git cũng kéo theo preview deployment cho branch/PR khác `main` — URL random,
+và **không gọi được API** vì `WEB_ORIGIN` trên Render chỉ whitelist origin
+production (xem mục 4 "Nối hai đầu lại"). Với project một mình dùng thì bỏ qua
+được, chỉ cần biết để không tưởng preview bị lỗi.
 
 ---
 
@@ -61,7 +64,7 @@ GitHub App rồi `vercel git connect`.
 Cách này cần `console.neon.tech` load được. Không load được thì dùng đường
 Marketplace ở mục trên.
 
-1. [console.neon.tech](https://console.neon.tech) → đăng ký bằng GitHub, **không nhập thẻ**.
+1. [console.neon.tech](https://console.neon.tech) → đăng ký bằng GitHub.
 2. Create project: region **Singapore** (gần VN nhất), Postgres 16+.
 3. Ở **Connection string**, lấy **hai** chuỗi:
 
@@ -82,7 +85,7 @@ free thì không hết hạn.
 
 ## 2. Render — deploy api
 
-1. [dashboard.render.com](https://dashboard.render.com) → đăng ký bằng GitHub, **không nhập thẻ**.
+1. [dashboard.render.com](https://dashboard.render.com) → đăng ký bằng GitHub.
 2. **New → Blueprint** → chọn repo `smart_expense_tracker`. Render đọc
    `render.yaml`, không phải tự điền build command.
 3. Render hỏi ba biến (`sync: false` trong blueprint):
@@ -117,7 +120,7 @@ free thì không hết hạn.
 
 ## 3. Vercel — deploy web
 
-1. [vercel.com/new](https://vercel.com/new) → import repo, plan **Hobby**, **không nhập thẻ**.
+1. [vercel.com/new](https://vercel.com/new) → import repo, plan **Hobby**.
 2. **Root Directory** = `apps/web`. Bắt buộc. Vercel sẽ tự nhận npm workspaces và
    cài dependency ở root repo.
 3. Environment variable:
@@ -162,33 +165,14 @@ không phải lỗi.
 
 ---
 
-## Vì sao không phát sinh phí
+## Hai thứ nên biết trước
 
-Không nhập thẻ ở cả ba nền tảng. Cả ba đều **dừng chạy** khi hết quota, không có
-overage billing:
-
-| | Khi hết quota |
-| :--- | :--- |
-| Vercel Hobby | Project pause tới chu kỳ sau. Không tính tiền vượt — Hobby không có overage. |
-| Render free | Service suspend tới đầu tháng sau. Service đang sleep **không** tiêu instance-hours, nên 750h/tháng gần như không thể hết với một service. |
-| Neon free | Compute suspend tới chu kỳ sau. |
-
-Hai điều duy nhất có thể sinh phí, và cả hai đều phải do bạn tự bấm:
-
-1. **Nâng plan.** Đừng. Render free service không tự lên plan trả tiền.
-2. **Vercel Hobby chỉ cho phi thương mại.** App quản lý chi tiêu cá nhân thì đúng
-   điều khoản. Nếu sau này nó thu tiền của ai đó thì phải lên Pro ($20/tháng) —
-   đấy là lúc quyết định lại, không phải bây giờ.
-
-Neon free là plan vĩnh viễn, không phải trial 30 ngày.
-
----
-
-## Ba thứ nên biết trước
-
-**Cold start ~1 phút.** Render free sleep sau 15 phút idle. Đã biết và chấp nhận
-từ ADR 9.1; ADR 9.9 ghi sẵn các đường thoát (đưa api lên Vercel serverless →
-cold start ~1s, vẫn 0đ). Ping định kỳ để giữ thức là giải pháp giả — xem 9.9.
+**Cold start ~1 phút.** Render free sleep sau 15 phút idle, nên request đầu
+tiên sau khoảng nghỉ đó phải chờ container khởi động lại. Đường thoát nếu cold
+start này không chấp nhận được: chuyển `apps/api` sang chạy trên nền serverless
+(ví dụ Vercel Functions) — cold start khi đó chỉ còn ~1 giây. Ping định kỳ để
+giữ container thức không giải quyết được vấn đề: nó chỉ trì hoãn cold start,
+không loại bỏ được.
 
 **Safari và Brave sẽ không giữ được đăng nhập.** Web ở `vercel.app`, api ở
 `onrender.com` là hai site khác nhau, nên refresh cookie là third-party cookie.
@@ -200,27 +184,24 @@ site, và partition đó nhất quán nên vẫn chạy).
 Cách sửa, khi nào cần:
 
 1. **Custom domain**: web `app.domain.com`, api `api.domain.com` → cùng site,
-   hết vấn đề. Mất tiền domain (~$10/năm), không còn 0đ tuyệt đối.
+   hết vấn đề.
 2. **Proxy api qua chính Next.js** (rewrite trong `next.config.ts`) → browser chỉ
-   thấy một origin, cookie thành first-party. 0đ, nhưng phải sửa
-   `NEXT_PUBLIC_API_URL` và `path` của refresh cookie (đang là `/auth`).
-
-**0.5 GB DB.** Một giao dịch là vài trăm byte. Vài chục nghìn giao dịch một năm
-vẫn còn cách giới hạn rất xa — hết chỗ vì dữ liệu chi tiêu cá nhân là chuyện
-không xảy ra.
+   thấy một origin, cookie thành first-party. Phải sửa `NEXT_PUBLIC_API_URL` và
+   `path` của refresh cookie (đang là `/auth`).
 
 ---
 
 ## Deploy lần sau
 
 ```bash
-git push                                  # api tự build lại
-vercel deploy --prod                      # web: chạy từ ROOT repo, không phải apps/web
+git push    # api và web đều tự build và deploy lại
 ```
 
-Web phải gọi tay vì project chưa nối Git (xem mục "Bản deploy đang chạy"). Chạy từ
-root là bắt buộc: Root Directory của project là `apps/web`, nên upload từ
-`apps/web` sẽ thành `apps/web/apps/web`.
+Không cần `vercel deploy --prod` tay nữa — xem mục "Bản deploy đang chạy" ở trên
+về việc web đã nối Git. Lệnh đó vẫn dùng được nếu cần trigger deploy web mà không
+đợi một push mới (chạy từ ROOT repo, không phải `apps/web` — Root Directory của
+project là `apps/web`, nên upload từ trong `apps/web` sẽ thành
+`apps/web/apps/web`).
 
 Migration mới được `migrate deploy` chạy trong buildCommand của Render, không phải
 làm tay. Migration lỗi thì build fail và Render giữ nguyên bản đang chạy — code mới

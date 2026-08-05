@@ -95,6 +95,18 @@ free thì không hết hạn.
 
    `JWT_ACCESS_SECRET` Render tự sinh, không phải làm gì.
 
+   **Đừng quên hai biến OPTIONAL của nút "Báo lỗi".** Chúng không có trong
+   `render.yaml` vì app thiếu chúng vẫn chạy — và chính vì thế rất dễ sót. Sót thì
+   `POST /api/feedback` trả 503 "chưa được cấu hình", còn mọi thứ khác vẫn xanh:
+
+   | Biến | Giá trị |
+   | :--- | :--- |
+   | `GITHUB_ISSUE_REPO` | `sansanhatecode/smart_expense_tracker` |
+   | `GITHUB_ISSUE_TOKEN` | fine-grained PAT, **chỉ** repo này, **chỉ** quyền Issues: Read and write |
+
+   Service dùng label `bug` và `enhancement` (xem `issue-body.ts`) — đó là label
+   mặc định của repo GitHub, nhưng xoá đi thì GitHub trả 422.
+
 4. Apply. Build ~3–5 phút. Nó chạy `migrate deploy` nên schema được tạo luôn —
    không cần seed: đăng ký user là tự có 15 danh mục + 108 rule.
 5. Ghi lại URL, dạng `https://expense-tracker-api-xxxx.onrender.com`.

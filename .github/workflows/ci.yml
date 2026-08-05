@@ -46,4 +46,11 @@ jobs:
 
       - run: npm run typecheck
 
+      # `npm test` load env.ts, và file đó validate process.env ngay lúc import
+      # (kể cả cho unit test không đụng DB) — xem comment trong apps/api/src/config/env.ts.
+      # Không có .env ở CI nên phải set tay hai biến bắt buộc; giá trị là giả,
+      # không có Postgres thật nào được mở.
       - run: npm test
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+          JWT_ACCESS_SECRET: ci-dummy-secret-at-least-32-characters-long

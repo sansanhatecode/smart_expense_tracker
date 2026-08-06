@@ -1,4 +1,4 @@
-import { isCardBillPayment } from './parse-value';
+import { isCardBillPayment, normalizeHeader } from './parse-value';
 import type { AccountKind } from '../generated/prisma/enums';
 import type { BankProfile, RawTransaction } from './types';
 
@@ -9,6 +9,11 @@ export interface DetectedAccount {
    * `profile.bank` chứ không phải `profile.id`: generic / generic-iso /
    * generic-us là cùng một ngân hàng xuất file với định dạng ngày khác nhau,
    * gộp chúng lại là đúng.
+   *
+   * Với thẻ tín dụng, nếu người dùng có nhập tên thẻ ở form upload thì tên đó
+   * (đã chuẩn hoá) được gấp thêm vào cuối, thành `bank:credit_card:tenThe` —
+   * nhờ vậy hai thẻ cùng ngân hàng không còn bị gộp chung một account. Không
+   * nhập tên thẻ thì fingerprint y hệt hôm nay.
    */
   fingerprint: string;
   /** Tên mặc định lúc tạo. Người dùng đổi được và đổi rồi thì không bị ghi đè. */
@@ -16,14 +21,33 @@ export interface DetectedAccount {
 }
 
 /**
- * Suy ra nguồn tiền của một file sao kê, không hỏi người dùng.
+ * Suy ra nguồn tiền của một file sao kê, không hỏi người dùng — trừ tên thẻ,
+ * thứ file không tự nói ra được (xem cardName bên dưới).
  *
- * Chỉ dựa vào những gì file tự nói ra. Tên file cố tình KHÔNG tham gia: nó đổi
- * theo từng lần tải về ('sao-ke-thang-7.csv', 'statement_2026_08.xlsx') nên lấy
- * nó làm khoá thì mỗi tháng lại đẻ ra một account mới.
+ * Tên file cố tình KHÔNG tham gia: nó đổi theo từng lần tải về
+ * ('sao-ke-thang-7.csv', 'statement_2026_08.xlsx') nên lấy nó làm khoá thì mỗi
+ * tháng lại đẻ ra một account mới.
+ *
+ * `cardName`: tên thẻ người dùng gõ ở form upload, tuỳ chọn. Chỉ có tác dụng
+ * khi kind suy ra được là credit_card — gõ nhầm gì đó vào ô này lúc upload sao
+ * kê ngân hàng/ví thì bị bỏ qua, không làm lệch fingerprint của loại nguồn
+ * tiền không liên quan.
  */
-export function detectAccount(profile: BankProfile, rows: RawTransaction[]): DetectedAccount {
+export function detectAccount(
+  profile: BankProfile,
+  rows: RawTransaction[],
+  cardName?: string,
+): DetectedAccount {
   const kind = detectKind(profile, rows);
+  const trimmedCardName = kind === 'credit_card' ? cardName?.trim() : undefined;
+
+  if (trimmedCardName) {
+    return {
+      kind,
+      fingerprint: `${profile.bank}:${kind}:${normalizeHeader(trimmedCardName)}`,
+      name: defaultAccountName(profile.bank, kind, trimmedCardName),
+    };
+  }
 
   return {
     kind,
@@ -58,8 +82,17 @@ const GENERIC_NAMES: Record<AccountKind, string> = {
 /**
  * Tên mặc định của một nguồn tiền. Export để script backfill đặt tên y hệt
  * đường import — hai chỗ lệch nhau sẽ cho ra hai cái tên cho cùng một cái ví.
+ *
+ * `cardName` chỉ có ý nghĩa khi `kind === 'credit_card'` — gọi hàm này với
+ * cardName cho bank/wallet là lỗi của chỗ gọi, không phải hàm này tự kiểm.
  */
-export function defaultAccountName(bank: string, kind: AccountKind): string {
+export function defaultAccountName(bank: string, kind: AccountKind, cardName?: string): string {
+  if (cardName) {
+    // Profile generic không biết mình là ngân hàng nào — bỏ hẳn phần "${bank}"
+    // thay vì in ra 'Thẻ tín dụng generic - ...' vô nghĩa.
+    return bank === 'generic' ? `Thẻ tín dụng - ${cardName}` : `Thẻ tín dụng ${bank} - ${cardName}`;
+  }
+
   // Profile generic không biết mình là ngân hàng nào, và `label` của nó là 'Tự
   // động nhận dạng' — đúng cho dropdown chọn profile, vô nghĩa làm tên nguồn tiền.
   if (bank === 'generic') return GENERIC_NAMES[kind];

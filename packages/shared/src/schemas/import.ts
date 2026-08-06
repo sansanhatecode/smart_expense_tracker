@@ -22,6 +22,12 @@ export type DuplicateKind = z.infer<typeof duplicateKindSchema>;
 export const uploadImportSchema = z.object({
   /** Id của BankProfile; bỏ trống thì API tự dò. */
   bankProfile: z.string().min(1).optional(),
+  /**
+   * Tên thẻ, tuỳ chọn — chỉ có ý nghĩa khi file là sao kê thẻ tín dụng. Dùng
+   * để tách nhiều thẻ cùng ngân hàng thành nhiều nguồn tiền riêng, xem
+   * account-detect.ts.
+   */
+  cardName: z.string().trim().max(80).optional(),
 });
 
 export type UploadImportInput = z.infer<typeof uploadImportSchema>;

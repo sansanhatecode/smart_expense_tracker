@@ -26,6 +26,7 @@ import {
   EmptyState,
   ErrorState,
   Field,
+  Input,
   Select,
   Skeleton,
   StatusBadge,
@@ -66,6 +67,7 @@ export default function ImportsPage() {
 function UploadPanel({ onUploaded }: { onUploaded: (batchId: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [profile, setProfile] = useState('');
+  const [cardName, setCardName] = useState('');
   const [error, setError] = useState<ApiError | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -80,6 +82,7 @@ function UploadPanel({ onUploaded }: { onUploaded: (batchId: string) => void }) 
       const form = new FormData();
       form.append('file', selected);
       if (profile) form.append('bankProfile', profile);
+      if (cardName.trim()) form.append('cardName', cardName.trim());
       return api.upload<ImportPreviewDto>('/api/imports', form);
     },
     onSuccess: (preview) => onUploaded(preview.batchId),
@@ -152,6 +155,17 @@ function UploadPanel({ onUploaded }: { onUploaded: (batchId: string) => void }) 
                   </option>
                 ))}
             </Select>
+          </Field>
+
+          <Field
+            label="Tên thẻ (tuỳ chọn)"
+            hint="Điền nếu bạn có nhiều thẻ tín dụng muốn tách riêng — ví dụ 'Visa cá nhân', 'Mastercard công ty'"
+          >
+            <Input
+              value={cardName}
+              onChange={(e) => setCardName(e.target.value)}
+              placeholder="Visa cá nhân"
+            />
           </Field>
 
           <Button

@@ -59,6 +59,7 @@ export class ImportsService {
     userId: string,
     file: UploadedFile,
     bankProfileId?: string,
+    cardName?: string,
   ): Promise<ImportPreviewDto> {
     this.assertFileAcceptable(file);
 
@@ -80,7 +81,7 @@ export class ImportsService {
 
     // Nguồn tiền suy ra từ dòng GỐC (còn dấu, còn cột MCC), trước khi normalize
     // — và normalize cần biết kết quả để phân loại khoản nội bộ.
-    const detected = detectAccount(profile, result.rows);
+    const detected = detectAccount(profile, result.rows, cardName);
 
     const { rows: normalized, skipped: normalizeSkipped } = normalize(
       result.rows,

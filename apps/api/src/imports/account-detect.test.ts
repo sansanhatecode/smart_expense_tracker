@@ -36,9 +36,9 @@ async function parseAuto(content: string) {
 }
 
 /** parse → detect → normalize, đúng thứ tự mà imports.service chạy. */
-async function run(content: string, profile: BankProfile = GENERIC_PROFILE) {
+async function run(content: string, profile: BankProfile = GENERIC_PROFILE, cardName?: string) {
   const parsed = await parse(content, profile);
-  const detected = detectAccount(profile, parsed.rows);
+  const detected = detectAccount(profile, parsed.rows, cardName);
   const { rows } = normalize(parsed.rows, profile, detected.kind);
   return { detected, rows };
 }
@@ -169,6 +169,58 @@ describe('detectAccount', () => {
       vcb,
     );
     expect(card.detected.name).toBe('Thẻ tín dụng VCB');
+  });
+});
+
+describe('phân biệt nhiều thẻ tín dụng cùng ngân hàng bằng tên thẻ', () => {
+  const CARD_CONTENT = ['Ngày,Diễn giải,MCC,Số tiền', '15/07/2026,SHOPEE,5262,-450.200'].join('\n');
+
+  it('hai tên thẻ khác nhau → hai fingerprint khác nhau, tên có kèm tên thẻ', async () => {
+    const vcb = findProfile('vcb');
+    if (!vcb) throw new Error('thiếu profile vcb');
+
+    const visa = await run(CARD_CONTENT, vcb, 'Visa cá nhân');
+    const mastercard = await run(CARD_CONTENT, vcb, 'Mastercard công ty');
+
+    expect(visa.detected.fingerprint).not.toBe(mastercard.detected.fingerprint);
+    expect(visa.detected.name).toBe('Thẻ tín dụng VCB - Visa cá nhân');
+    expect(mastercard.detected.name).toBe('Thẻ tín dụng VCB - Mastercard công ty');
+  });
+
+  it('cùng tên thẻ ở hai lần import khác nhau → cùng fingerprint', async () => {
+    const vcb = findProfile('vcb');
+    if (!vcb) throw new Error('thiếu profile vcb');
+
+    const july = await run(CARD_CONTENT, vcb, 'Visa cá nhân');
+    const august = await run(
+      ['Ngày,Diễn giải,MCC,Số tiền', '15/08/2026,HIGHLANDS,5814,-85.000'].join('\n'),
+      vcb,
+      'Visa cá nhân',
+    );
+
+    expect(august.detected.fingerprint).toBe(july.detected.fingerprint);
+  });
+
+  it('không nhập tên thẻ → fingerprint và tên giữ nguyên như hôm nay', async () => {
+    const vcb = findProfile('vcb');
+    if (!vcb) throw new Error('thiếu profile vcb');
+
+    const card = await run(CARD_CONTENT, vcb);
+
+    expect(card.detected).toMatchObject({ fingerprint: 'VCB:credit_card', name: 'Thẻ tín dụng VCB' });
+  });
+
+  it('nhập tên thẻ nhưng file hoá ra không phải thẻ tín dụng → bị bỏ qua', async () => {
+    const vcb = findProfile('vcb');
+    if (!vcb) throw new Error('thiếu profile vcb');
+
+    const bank = await run(
+      ['Ngày,Nội dung,Số tiền', '15/07/2026,GRAB,-120.000'].join('\n'),
+      vcb,
+      'Visa cá nhân',
+    );
+
+    expect(bank.detected).toMatchObject({ fingerprint: 'VCB:bank', name: 'VCB' });
   });
 });
 

@@ -62,6 +62,7 @@ export class ImportsController {
     @CurrentUserId() userId: string,
     @UploadedFileParam() file: Express.Multer.File | undefined,
     @Body('bankProfile') bankProfile?: string,
+    @Body('cardName') cardName?: string,
   ): Promise<ImportPreviewDto> {
     if (!file) {
       throw new BadRequestException('Chưa chọn file. Gửi file trong field "file".');
@@ -74,7 +75,7 @@ export class ImportsController {
       size: file.size,
     };
 
-    return this.imports.createBatch(userId, uploaded, bankProfile);
+    return this.imports.createBatch(userId, uploaded, bankProfile, cardName);
   }
 
   @Get(':id')

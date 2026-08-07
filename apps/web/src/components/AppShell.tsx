@@ -145,9 +145,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       )}
 
       <main className="min-w-0 px-4 py-6 lg:px-8 lg:py-8">
-        {/* Bề rộng nội dung quyết định ở đây, một lần. Trang nào cần cột hẹp hơn
-            thì tự đặt max-w của mình mà KHÔNG căn giữa — nhờ vậy mọi trang chung
-            một mép trái và chuyển trang không thấy nội dung nhảy ngang. */}
+        {/* Bề rộng tối đa quyết định ở đây, một lần. Trang nào cần cột hẹp hơn
+            thì tự đặt `mx-auto max-w-*` của mình — cột hẹp nằm giữa khung nhìn
+            thay vì dán mép trái và bỏ trống nửa màn hình bên phải. */}
         <div className="mx-auto w-full max-w-6xl">{children}</div>
       </main>
 

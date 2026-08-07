@@ -55,7 +55,7 @@ export default function BudgetsPage() {
   const available = expenseCategories.filter((c) => !used.has(c.id));
 
   return (
-    <div className="max-w-4xl space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6">
       <PageHeader
         title="Ngân sách"
         subtitle={formatMonth(month)}

@@ -69,7 +69,7 @@ export default function CategoriesPage() {
   ];
 
   return (
-    <div className="max-w-4xl space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6">
       <PageHeader
         title="Danh mục"
         subtitle={rules.data ? `${rules.data.length} rule tự phân loại` : 'Đang tải…'}

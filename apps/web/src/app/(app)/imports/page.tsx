@@ -11,7 +11,7 @@ export default function ImportsPage() {
   const [batchId, setBatchId] = useState<string | null>(null);
 
   return (
-    <div className="max-w-5xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <PageHeader
         title="Import sao kê"
         subtitle="Tải file CSV hoặc Excel từ ngân hàng. Xem trước rồi mới ghi vào dữ liệu."

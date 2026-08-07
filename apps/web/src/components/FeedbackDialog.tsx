@@ -96,7 +96,7 @@ export function FeedbackDialog({ open, onClose }: { open: boolean; onClose: () =
     >
       {submit.isSuccess ? (
         <div className="space-y-4">
-          <p className="flex items-start gap-2 text-sm text-ink">
+          <p className="flex items-start gap-2 rounded-token-sm bg-good/10 p-3 text-sm text-ink">
             <CircleCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-good" />
             Cảm ơn bạn. Báo lỗi đã được ghi lại thành issue #{submit.data.number}, dev sẽ
             xem sớm.
@@ -106,7 +106,7 @@ export function FeedbackDialog({ open, onClose }: { open: boolean; onClose: () =
               href={submit.data.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex h-8 items-center px-3 text-sm font-medium text-accent"
+              className="inline-flex h-8 items-center rounded-token-sm px-3 text-sm font-medium text-accent transition-colors hover:bg-surface-hover"
             >
               Xem issue
             </a>

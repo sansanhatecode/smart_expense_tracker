@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { useAuth } from '@/lib/auth';
+import { LoadingScreen } from '@/components/ui';
 
 /**
  * Trang gốc chỉ điều hướng.
@@ -20,9 +21,5 @@ export default function RootPage() {
     router.replace(user ? '/dashboard' : '/login');
   }, [user, loading, router]);
 
-  return (
-    <div className="flex min-h-dvh items-center justify-center">
-      <p className="text-sm text-ink-muted">Đang tải…</p>
-    </div>
-  );
+  return <LoadingScreen />;
 }

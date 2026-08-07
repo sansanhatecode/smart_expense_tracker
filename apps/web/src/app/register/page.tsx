@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { Button, Card, Field, Input } from '@/components/ui';
+import { AuthShell } from '@/components/AuthShell';
+import { Button, Field, Input } from '@/components/ui';
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -32,69 +33,60 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center gap-6 px-6 py-12">
-      <header className="space-y-1.5">
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Đăng ký</h1>
+    <AuthShell
+      title="Đăng ký"
+      subtitle="Tài khoản mới sẽ có sẵn 15 danh mục và bộ rule tự phân loại"
+      footer={
         <p className="text-sm text-ink-secondary">
-          Tài khoản mới sẽ có sẵn 15 danh mục và bộ rule tự phân loại
+          Đã có tài khoản?{' '}
+          <Link href="/login" className="font-medium text-accent underline">
+            Đăng nhập
+          </Link>
         </p>
-      </header>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+        <Field label="Tên" hint="Không bắt buộc">
+          <Input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
+        </Field>
 
-      <Card className="p-5">
-        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
-          <Field label="Tên" hint="Không bắt buộc">
-            <Input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
-          </Field>
+        <Field label="Email" error={error?.fieldError('email')}>
+          <Input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
+            required
+            invalid={Boolean(error?.fieldError('email'))}
+          />
+        </Field>
 
-          <Field label="Email" error={error?.fieldError('email')}>
-            <Input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-              required
-              invalid={Boolean(error?.fieldError('email'))}
-            />
-          </Field>
+        <Field label="Mật khẩu" error={error?.fieldError('password')} hint="Ít nhất 8 ký tự">
+          <Input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
+            required
+            minLength={8}
+            invalid={Boolean(error?.fieldError('password'))}
+          />
+        </Field>
 
-          <Field
-            label="Mật khẩu"
-            error={error?.fieldError('password')}
-            hint="Ít nhất 8 ký tự"
-          >
-            <Input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="new-password"
-              required
-              minLength={8}
-              invalid={Boolean(error?.fieldError('password'))}
-            />
-          </Field>
+        {error && !error.fieldErrors && (
+          <p className="text-sm text-critical" role="alert">
+            {error.status === 409
+              ? 'Email này đã được đăng ký'
+              : error.status === 429
+                ? 'Thử quá nhiều lần. Đợi một phút rồi thử lại.'
+                : error.message}
+          </p>
+        )}
 
-          {error && !error.fieldErrors && (
-            <p className="text-sm text-critical" role="alert">
-              {error.status === 409
-                ? 'Email này đã được đăng ký'
-                : error.status === 429
-                  ? 'Thử quá nhiều lần. Đợi một phút rồi thử lại.'
-                  : error.message}
-            </p>
-          )}
-
-          <Button type="submit" variant="primary" loading={submitting} className="w-full">
-            Tạo tài khoản
-          </Button>
-        </form>
-      </Card>
-
-      <p className="text-center text-sm text-ink-secondary">
-        Đã có tài khoản?{' '}
-        <Link href="/login" className="font-medium text-accent underline">
-          Đăng nhập
-        </Link>
-      </p>
-    </main>
+        <Button type="submit" variant="primary" loading={submitting} className="w-full">
+          Tạo tài khoản
+        </Button>
+      </form>
+    </AuthShell>
   );
 }

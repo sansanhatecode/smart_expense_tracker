@@ -2,7 +2,7 @@
 
 import { ChartPie } from 'lucide-react';
 import { Card } from './ui';
-import { ThemeToggle } from './theme-toggle';
+import { ThemeToggle } from './ThemeToggle';
 
 /**
  * Khung chung cho hai trang đăng nhập / đăng ký.

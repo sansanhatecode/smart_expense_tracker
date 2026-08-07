@@ -19,9 +19,9 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
-import { DonateDialog } from './donate-dialog';
-import { FeedbackDialog } from './feedback-dialog';
-import { ThemeToggle } from './theme-toggle';
+import { DonateDialog } from './DonateDialog';
+import { FeedbackDialog } from './FeedbackDialog';
+import { ThemeToggle } from './ThemeToggle';
 import { Button } from './ui';
 
 const NAV = [

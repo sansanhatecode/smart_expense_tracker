@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { AuthShell } from '@/components/auth-shell';
+import { AuthShell } from '@/components/AuthShell';
 import { Button, Field, Input } from '@/components/ui';
 
 export default function LoginPage() {

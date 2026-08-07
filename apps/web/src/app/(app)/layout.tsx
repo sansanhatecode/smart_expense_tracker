@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
-import { AppShell } from '@/components/app-shell';
+import { AppShell } from '@/components/AppShell';
 import { useAuth } from '@/lib/auth';
 import { LoadingScreen } from '@/components/ui';
 

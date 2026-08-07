@@ -45,10 +45,7 @@ export function DonateDialog({ open, onClose }: { open: boolean; onClose: () => 
       description="App miễn phí, không quảng cáo. Nếu nó giúp bạn quản tiền dễ hơn thì mời dev một ly cà phê nhé — hoàn toàn tuỳ tâm."
       onClose={onClose}
     >
-      <div
-        className="flex flex-wrap items-center justify-between gap-3 border bg-surface-raised px-4 py-3"
-        style={{ borderRadius: 'var(--radius-sm)' }}
-      >
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-token-sm border bg-surface-raised px-4 py-3">
         <div className="text-sm">
           {/* `tabular` để dãy số không nhảy chiều rộng, giống mọi số tiền khác
               trong app. `select-all` để bấm một lần là chọn trọn số. */}

@@ -9,6 +9,7 @@ import { ApiError, api } from '@/lib/api';
 import { formatDateShort } from '@/lib/utils';
 import {
   Button,
+  ButtonLink,
   Card,
   CardHeader,
   CategoryIcon,
@@ -16,6 +17,7 @@ import {
   ErrorState,
   Field,
   Input,
+  PageHeader,
   Skeleton,
 } from '@/components/ui';
 
@@ -41,13 +43,11 @@ export default function AccountsPage() {
   });
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Nguồn tiền</h1>
-        <p className="mt-0.5 text-sm text-ink-secondary">
-          Được tạo tự động từ sao kê bạn import. Đổi tên để dễ nhận ra.
-        </p>
-      </header>
+    <div className="max-w-4xl space-y-6">
+      <PageHeader
+        title="Nguồn tiền"
+        subtitle="Được tạo tự động từ sao kê bạn import. Đổi tên để dễ nhận ra."
+      />
 
       {accounts.isPending ? (
         <div className="space-y-4">
@@ -66,10 +66,13 @@ export default function AccountsPage() {
             title="Chưa có nguồn tiền nào"
             description="Import một file sao kê — hệ thống tự nhận ra đó là thẻ tín dụng, tài khoản ngân hàng hay ví điện tử."
             action={
-              <Button variant="primary" size="sm" onClick={() => (location.href = '/imports')}>
+              // ButtonLink chứ không phải Button + `location.href`: gán
+              // `location.href` là tải lại cả trang, tức mất hết cache của
+              // react-query và bắt đầu lại từ màn hình chờ.
+              <ButtonLink href="/imports" variant="primary" size="sm">
                 <Upload aria-hidden className="size-4" />
                 Import sao kê
-              </Button>
+              </ButtonLink>
             }
           />
         </Card>
@@ -144,7 +147,10 @@ function AccountCard({ account, onDone }: { account: AccountDto; onDone: () => v
 
 function Figure({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div>
+    // Ba con số của thẻ tín dụng đứng trong ô nền dịu: chúng là tóm tắt đọc-thôi
+    // nằm ngay trên một form sửa được, và không có gì tách hai vùng đó ra thì
+    // người dùng thử bấm vào số để sửa.
+    <div className="rounded-token-sm bg-surface-hover px-3 py-2.5">
       <p className="text-sm text-ink-secondary">{label}</p>
       <p className="mt-1 text-lg font-semibold tracking-tight text-ink">{value}</p>
       {hint && <p className="mt-0.5 text-sm text-ink-muted">{hint}</p>}

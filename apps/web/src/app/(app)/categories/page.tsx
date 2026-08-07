@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { ApiError, api } from '@/lib/api';
 import { useCategories } from '@/lib/queries';
+import { cn } from '@/lib/utils';
 import {
   Badge,
   Button,
@@ -18,6 +19,7 @@ import {
   ErrorState,
   Field,
   Input,
+  PageHeader,
   Select,
   Skeleton,
 } from '@/components/ui';
@@ -103,19 +105,21 @@ export default function CategoriesPage() {
   ];
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">Danh mục</h1>
-          <p className="mt-0.5 text-sm text-ink-secondary">
-            {rules.data ? `${rules.data.length} rule tự phân loại` : 'Đang tải…'}
-          </p>
-        </div>
-        <Button variant="primary" size="sm" onClick={() => setShowForm((open) => !open)}>
-          {showForm ? <X aria-hidden className="size-4" /> : <Plus aria-hidden className="size-4" />}
-          {showForm ? 'Đóng' : 'Thêm danh mục'}
-        </Button>
-      </header>
+    <div className="max-w-4xl space-y-6">
+      <PageHeader
+        title="Danh mục"
+        subtitle={rules.data ? `${rules.data.length} rule tự phân loại` : 'Đang tải…'}
+        actions={
+          <Button variant="primary" size="sm" onClick={() => setShowForm((open) => !open)}>
+            {showForm ? (
+              <X aria-hidden className="size-4" />
+            ) : (
+              <Plus aria-hidden className="size-4" />
+            )}
+            {showForm ? 'Đóng' : 'Thêm danh mục'}
+          </Button>
+        }
+      />
 
       {showForm && (
         <CategoryForm
@@ -143,7 +147,10 @@ export default function CategoriesPage() {
             ) : (
               <ul className="mt-3 divide-y">
                 {group.items.map((category) => (
-                  <li key={category.id} className="flex items-center gap-3 px-5 py-3">
+                  <li
+                    key={category.id}
+                    className="flex items-center gap-3 px-5 py-3 transition-colors duration-150 hover:bg-surface-hover"
+                  >
                     <CategoryIcon icon={category.icon} color={category.color} />
 
                     {/*
@@ -166,9 +173,7 @@ export default function CategoriesPage() {
                       <p className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
                         <span>{category.transactionCount ?? 0} giao dịch</span>
                         {(ruleCountByCategory.get(category.id) ?? 0) > 0 && (
-                          <Badge className="text-[0.75rem]">
-                            {ruleCountByCategory.get(category.id)} rule
-                          </Badge>
+                          <Badge size="sm">{ruleCountByCategory.get(category.id)} rule</Badge>
                         )}
                       </p>
                     </Link>
@@ -277,8 +282,12 @@ function CategoryForm({ onDone }: { onDone: () => void }) {
                 onClick={() => setIcon(option)}
                 aria-label={option}
                 aria-pressed={icon === option}
-                className={icon === option ? 'ring-2 ring-accent' : ''}
-                style={{ borderRadius: 'var(--radius-sm)' }}
+                // Vòng chọn cách ô một khoảng (`ring-offset`) ở cả hai nhóm: dán
+                // sát viền ô thì nó lẫn vào chính hình đang chọn.
+                className={cn(
+                  'rounded-token-sm ring-offset-2 ring-offset-surface transition-shadow',
+                  icon === option ? 'ring-2 ring-accent' : 'hover:ring-1 hover:ring-border-strong',
+                )}
               >
                 <CategoryIcon icon={option} color={color} />
               </button>
@@ -295,8 +304,11 @@ function CategoryForm({ onDone }: { onDone: () => void }) {
                 onClick={() => setColor(option)}
                 aria-label={`Màu ${option}`}
                 aria-pressed={color === option}
-                className={`size-8 ${color === option ? 'ring-2 ring-offset-2 ring-accent' : ''}`}
-                style={{ backgroundColor: option, borderRadius: 'var(--radius-sm)' }}
+                className={cn(
+                  'size-8 rounded-token-sm ring-offset-2 ring-offset-surface transition-shadow',
+                  color === option ? 'ring-2 ring-accent' : 'hover:ring-1 hover:ring-border-strong',
+                )}
+                style={{ backgroundColor: option }}
               />
             ))}
           </div>

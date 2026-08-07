@@ -27,6 +27,7 @@ import {
   ErrorState,
   Field,
   Input,
+  PageHeader,
   Select,
   Skeleton,
   StatusBadge,
@@ -42,13 +43,11 @@ export default function ImportsPage() {
   const [batchId, setBatchId] = useState<string | null>(null);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Import sao kê</h1>
-        <p className="mt-0.5 text-sm text-ink-secondary">
-          Tải file CSV hoặc Excel từ ngân hàng. Xem trước rồi mới ghi vào dữ liệu.
-        </p>
-      </header>
+    <div className="max-w-5xl space-y-6">
+      <PageHeader
+        title="Import sao kê"
+        subtitle="Tải file CSV hoặc Excel từ ngân hàng. Xem trước rồi mới ghi vào dữ liệu."
+      />
 
       {batchId ? (
         <PreviewPanel batchId={batchId} onClose={() => setBatchId(null)} />
@@ -110,10 +109,11 @@ function UploadPanel({ onUploaded }: { onUploaded: (batchId: string) => void }) 
             setDragging(false);
             selectFile(e.dataTransfer.files[0] ?? null);
           }}
-          className={`flex cursor-pointer flex-col items-center justify-center gap-2 border border-dashed px-6 py-8 text-center transition-colors ${
-            dragging ? 'border-accent bg-accent-soft' : 'hover:bg-surface-raised'
+          className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-token border-2 border-dashed px-6 py-8 text-center transition-colors duration-150 ${
+            dragging
+              ? 'border-accent bg-accent-soft'
+              : 'hover:border-border-strong hover:bg-surface-hover'
           }`}
-          style={{ borderRadius: 'var(--radius)' }}
         >
           <input
             type="file"
@@ -123,7 +123,9 @@ function UploadPanel({ onUploaded }: { onUploaded: (batchId: string) => void }) 
           />
           {file ? (
             <>
-              <FileSpreadsheet aria-hidden className="size-6 text-accent" />
+              <span className="flex size-11 items-center justify-center rounded-token bg-accent-soft">
+                <FileSpreadsheet aria-hidden className="size-5 text-accent" />
+              </span>
               <span className="text-sm font-medium text-ink">{file.name}</span>
               <span className="text-sm text-ink-muted">
                 {(file.size / 1024).toFixed(0)} KB · bấm để đổi file
@@ -131,7 +133,9 @@ function UploadPanel({ onUploaded }: { onUploaded: (batchId: string) => void }) 
             </>
           ) : (
             <>
-              <Upload aria-hidden className="size-6 text-ink-muted" />
+              <span className="flex size-11 items-center justify-center rounded-token bg-surface-hover">
+                <Upload aria-hidden className="size-5 text-ink-muted" />
+              </span>
               <span className="text-sm font-medium text-ink">
                 Kéo file vào đây, hoặc bấm để chọn
               </span>
@@ -333,7 +337,7 @@ function PreviewPanel({ batchId, onClose }: { batchId: string; onClose: () => vo
           {rows.map((row) => (
             <li
               key={row.id}
-              className={`flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5 ${
+              className={`flex flex-wrap items-center gap-3 px-4 py-3 transition-colors duration-150 hover:bg-surface-hover sm:px-5 ${
                 row.selected ? '' : 'opacity-55'
               }`}
             >
@@ -341,7 +345,7 @@ function PreviewPanel({ batchId, onClose }: { batchId: string; onClose: () => vo
                 type="checkbox"
                 checked={row.selected}
                 aria-label={`Thêm ${row.description}`}
-                className="size-4 shrink-0 accent-[var(--accent)]"
+                className="accent-accent size-4 shrink-0"
                 onChange={(e) =>
                   updateRow.mutate({ rowId: row.id, patch: { selected: e.target.checked } })
                 }
@@ -359,7 +363,7 @@ function PreviewPanel({ batchId, onClose }: { batchId: string; onClose: () => vo
                   {row.duplicate === 'in_db' && (
                     <StatusBadge status="warning">Đã có trong dữ liệu</StatusBadge>
                   )}
-                  {!row.category && <Badge className="text-[0.75rem]">chưa phân loại</Badge>}
+                  {!row.category && <Badge size="sm">chưa phân loại</Badge>}
                 </p>
               </div>
 
@@ -490,8 +494,13 @@ function BatchHistory({ onOpen }: { onOpen: (batchId: string) => void }) {
       <CardHeader title="Lịch sử import" subtitle="Hoàn lại được cả lô" />
       <ul className="mt-3 divide-y">
         {batches.data.map((batch) => (
-          <li key={batch.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
-            <FileSpreadsheet aria-hidden className="size-5 shrink-0 text-ink-muted" />
+          <li
+            key={batch.id}
+            className="flex flex-wrap items-center gap-3 px-5 py-3 transition-colors duration-150 hover:bg-surface-hover"
+          >
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-token-sm bg-surface-hover">
+              <FileSpreadsheet aria-hidden className="size-4 text-ink-muted" />
+            </span>
 
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-ink">{batch.fileName}</p>

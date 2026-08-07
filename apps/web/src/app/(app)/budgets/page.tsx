@@ -18,6 +18,7 @@ import {
   ErrorState,
   Field,
   Input,
+  PageHeader,
   Select,
   Skeleton,
 } from '@/components/ui';
@@ -56,25 +57,25 @@ export default function BudgetsPage() {
   const available = expenseCategories.filter((c) => !used.has(c.id));
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">Ngân sách</h1>
-          <p className="mt-0.5 text-sm text-ink-secondary">{formatMonth(month)}</p>
-        </div>
-        <Select
-          aria-label="Chọn kỳ"
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-          className="w-44"
-        >
-          {monthKeyOptions(MONTH_OPTIONS.count, MONTH_OPTIONS.ahead).map((option) => (
-            <option key={option} value={option}>
-              {formatMonth(option)}
-            </option>
-          ))}
-        </Select>
-      </header>
+    <div className="max-w-4xl space-y-6">
+      <PageHeader
+        title="Ngân sách"
+        subtitle={formatMonth(month)}
+        actions={
+          <Select
+            aria-label="Chọn kỳ"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            className="w-44"
+          >
+            {monthKeyOptions(MONTH_OPTIONS.count, MONTH_OPTIONS.ahead).map((option) => (
+              <option key={option} value={option}>
+                {formatMonth(option)}
+              </option>
+            ))}
+          </Select>
+        }
+      />
 
       {available.length > 0 && (
         <BudgetForm month={month} categories={available} onDone={invalidate} />

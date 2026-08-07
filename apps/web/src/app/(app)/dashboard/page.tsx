@@ -39,6 +39,7 @@ import {
   CategoryIcon,
   EmptyState,
   ErrorState,
+  PageHeader,
   Select,
   Skeleton,
 } from '@/components/ui';
@@ -130,48 +131,48 @@ export default function DashboardPage() {
   const canFilterByAccount = (accounts.data?.length ?? 0) > 1;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">Tổng quan</h1>
-          <p className="mt-0.5 text-sm text-ink-secondary">{formatMonth(month)}</p>
-        </div>
-        {/* Ô chọn kỳ nằm NGOÀI nhánh rỗng bên dưới: tháng không có giao dịch vẫn
-            phải đổi được kỳ, nếu không người dùng kẹt ở một tháng trống. */}
-        <div className="flex flex-wrap items-center gap-2">
-          {canFilterByAccount && (
+    <div className="space-y-6">
+      {/* Ô chọn kỳ nằm NGOÀI nhánh rỗng bên dưới: tháng không có giao dịch vẫn
+          phải đổi được kỳ, nếu không người dùng kẹt ở một tháng trống. */}
+      <PageHeader
+        title="Tổng quan"
+        subtitle={formatMonth(month)}
+        actions={
+          <>
+            {canFilterByAccount && (
+              <Select
+                aria-label="Lọc theo nguồn tiền"
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+                className="w-48"
+              >
+                <option value="">Tất cả nguồn tiền</option>
+                {accounts.data?.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
+              </Select>
+            )}
             <Select
-              aria-label="Lọc theo nguồn tiền"
-              value={accountId}
-              onChange={(e) => setAccountId(e.target.value)}
-              className="w-48"
+              aria-label="Chọn kỳ"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="w-44"
             >
-              <option value="">Tất cả nguồn tiền</option>
-              {accounts.data?.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
+              {monthKeyOptions(MONTH_COUNT).map((option) => (
+                <option key={option} value={option}>
+                  {formatMonth(option)}
                 </option>
               ))}
             </Select>
-          )}
-          <Select
-            aria-label="Chọn kỳ"
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            className="w-44"
-          >
-            {monthKeyOptions(MONTH_COUNT).map((option) => (
-              <option key={option} value={option}>
-                {formatMonth(option)}
-              </option>
-            ))}
-          </Select>
-          <ButtonLink href="/imports" variant="primary" size="sm">
-            <Upload aria-hidden className="size-4" />
-            Import sao kê
-          </ButtonLink>
-        </div>
-      </header>
+            <ButtonLink href="/imports" variant="primary" size="sm">
+              <Upload aria-hidden className="size-4" />
+              Import sao kê
+            </ButtonLink>
+          </>
+        }
+      />
 
       {noData ? (
         <Card>
@@ -196,10 +197,10 @@ export default function DashboardPage() {
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {summary.isPending ? (
               <>
-                <Skeleton className="h-[7.5rem]" />
-                <Skeleton className="h-[7.5rem]" />
-                <Skeleton className="h-[7.5rem]" />
-                <Skeleton className="h-[7.5rem]" />
+                <Skeleton className="h-30" />
+                <Skeleton className="h-30" />
+                <Skeleton className="h-30" />
+                <Skeleton className="h-30" />
               </>
             ) : summary.isError ? (
               <Card className="sm:col-span-2 xl:col-span-4">
@@ -264,7 +265,9 @@ export default function DashboardPage() {
               // tại và người dùng thấy danh sách rỗng ngay sau khi vừa đọc "đã
               // loại 4 khoản" — trông như link hỏng.
               href={`/transactions?internal=only&from=${period.from}&to=${period.to}`}
-              className="flex items-center gap-2 text-sm text-ink-secondary hover:text-ink"
+              // Nền dịu và viền đứt: đây là một ghi chú về các con số phía trên,
+              // không phải một card dữ liệu ngang hàng với chúng.
+              className="flex flex-wrap items-center gap-2 rounded-token border border-dashed px-4 py-2.5 text-sm text-ink-secondary transition-colors duration-150 hover:border-border-strong hover:bg-surface-hover hover:text-ink"
             >
               <Shuffle aria-hidden className="size-4 shrink-0 text-ink-muted" />
               Đã loại {summary.data.internal.count} khoản chuyển tiền nội bộ (
@@ -273,7 +276,13 @@ export default function DashboardPage() {
             </Link>
           )}
 
-          <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
+          {/*
+            `items-start` để mỗi card cao bằng đúng nội dung của nó.
+            Mặc định grid kéo cả hàng cao bằng card cao nhất, và ở đây card cảnh
+            báo ngân sách có thể dài gấp đôi chart — kết quả là một vùng trống
+            bằng nửa card, trông như dữ liệu bị thiếu chứ không như bố cục.
+          */}
+          <div className="grid items-start gap-6 lg:grid-cols-[1.4fr_1fr]">
             {/* ─── Xu hướng 6 tháng ─── */}
             <Card>
               <CardHeader
@@ -299,10 +308,13 @@ export default function DashboardPage() {
                 action={
                   <Link
                     href="/budgets"
-                    className="flex items-center gap-1 text-sm font-medium text-accent"
+                    className="group flex items-center gap-1 text-sm font-medium text-accent hover:underline"
                   >
                     Tất cả
-                    <ArrowRight aria-hidden className="size-3.5" />
+                    <ArrowRight
+                      aria-hidden
+                      className="size-3.5 transition-transform duration-150 group-hover:translate-x-0.5"
+                    />
                   </Link>
                 }
               />
@@ -336,7 +348,10 @@ export default function DashboardPage() {
             </Card>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
+          {/* `items-start` cùng lý do như hàng trên: một người chỉ có một nguồn
+              tiền thì card bên phải đúng một dòng, trong khi card bên trái có cả
+              chục danh mục. */}
+          <div className="grid items-start gap-6 lg:grid-cols-2">
             {/* ─── Chi theo danh mục ─── */}
             <Card>
               <CardHeader
@@ -418,78 +433,79 @@ export default function DashboardPage() {
             </Card>
           </div>
 
-          <div className="grid gap-6">
-            {/* ─── Giao dịch gần đây ─── */}
-            <Card>
-              <CardHeader
-                title="Giao dịch gần đây"
-                subtitle={formatMonth(month)}
-                action={
-                  <Link
-                    href="/transactions"
-                    className="flex items-center gap-1 text-sm font-medium text-accent"
-                  >
-                    Tất cả
-                    <ArrowRight aria-hidden className="size-3.5" />
-                  </Link>
-                }
-              />
-              <div className="mt-3">
-                {recent.isPending ? (
-                  <div className="space-y-3 px-5 pb-5">
-                    {[0, 1, 2, 3].map((i) => (
-                      <Skeleton key={i} className="h-12" />
-                    ))}
-                  </div>
-                ) : recent.isError ? (
-                  <ErrorState error={recent.error} onRetry={() => void recent.refetch()} />
-                ) : recent.data.items.length === 0 ? (
-                  <p className="px-5 py-8 text-center text-sm text-ink-muted">
-                    Chưa có giao dịch nào
-                  </p>
-                ) : (
-                  <ul className="divide-y">
-                    {recent.data.items.map((tx) => (
-                      <li key={tx.id} className="flex items-center gap-3 px-5 py-3">
-                        <CategoryIcon
-                          icon={tx.category?.icon ?? 'CircleHelp'}
-                          color={tx.category?.color ?? '#898781'}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-ink">
-                            {tx.description}
-                          </p>
-                          <p className="text-sm text-ink-muted">
-                            {formatDateShort(tx.date)}
-                            {tx.category ? ` · ${tx.category.name}` : ' · Chưa phân loại'}
-                            {/* Không im lặng: dòng này hiện số tiền nhưng KHÔNG
-                                nằm trong các KPI phía trên. Thấy một khoản 862k
-                                mà tổng chi không đổi thì người dùng sẽ nghĩ app
-                                tính sai. */}
-                            {tx.internalKind && ' · ngoài thống kê'}
-                          </p>
-                        </div>
-                        <span
-                          className="shrink-0 text-sm font-medium tabular"
-                          style={{
-                            color:
-                              tx.internalKind
-                                ? 'var(--ink-muted)'
-                                : tx.type === 'income'
-                                  ? 'var(--series-income)'
-                                  : 'var(--ink)',
-                          }}
-                        >
-                          {tx.type === 'income' ? '+' : '−'}
-                          {formatVnd(tx.amount)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </Card>
-          </div>
+          {/* ─── Giao dịch gần đây ─── */}
+          <Card>
+            <CardHeader
+              title="Giao dịch gần đây"
+              subtitle={formatMonth(month)}
+              action={
+                <Link
+                  href="/transactions"
+                  className="group flex items-center gap-1 text-sm font-medium text-accent hover:underline"
+                >
+                  Tất cả
+                  <ArrowRight
+                    aria-hidden
+                    className="size-3.5 transition-transform duration-150 group-hover:translate-x-0.5"
+                  />
+                </Link>
+              }
+            />
+            <div className="mt-3">
+              {recent.isPending ? (
+                <div className="space-y-3 px-5 pb-5">
+                  {[0, 1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-12" />
+                  ))}
+                </div>
+              ) : recent.isError ? (
+                <ErrorState error={recent.error} onRetry={() => void recent.refetch()} />
+              ) : recent.data.items.length === 0 ? (
+                <p className="px-5 py-8 text-center text-sm text-ink-muted">
+                  Chưa có giao dịch nào
+                </p>
+              ) : (
+                <ul className="divide-y">
+                  {recent.data.items.map((tx) => (
+                    <li
+                      key={tx.id}
+                      className="flex items-center gap-3 px-5 py-3 transition-colors duration-150 hover:bg-surface-hover"
+                    >
+                      <CategoryIcon
+                        icon={tx.category?.icon ?? 'CircleHelp'}
+                        color={tx.category?.color ?? '#898781'}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-ink">{tx.description}</p>
+                        <p className="text-sm text-ink-muted">
+                          {formatDateShort(tx.date)}
+                          {tx.category ? ` · ${tx.category.name}` : ' · Chưa phân loại'}
+                          {/* Không im lặng: dòng này hiện số tiền nhưng KHÔNG
+                              nằm trong các KPI phía trên. Thấy một khoản 862k
+                              mà tổng chi không đổi thì người dùng sẽ nghĩ app
+                              tính sai. */}
+                          {tx.internalKind && ' · ngoài thống kê'}
+                        </p>
+                      </div>
+                      <span
+                        className="shrink-0 text-sm font-medium tabular"
+                        style={{
+                          color: tx.internalKind
+                            ? 'var(--ink-muted)'
+                            : tx.type === 'income'
+                              ? 'var(--series-income)'
+                              : 'var(--ink)',
+                        }}
+                      >
+                        {tx.type === 'income' ? '+' : '−'}
+                        {formatVnd(tx.amount)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </Card>
         </>
       )}
     </div>

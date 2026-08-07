@@ -85,7 +85,7 @@ export function StatTile({
 
   const body = (
     <>
-      <p className="flex items-center gap-1.5 text-sm text-ink-secondary">
+      <p className="flex items-center gap-1.5 text-sm font-medium text-ink-secondary">
         {label}
         {hint && <Info aria-hidden className="size-3.5 shrink-0 text-ink-muted" />}
         {href && (
@@ -99,7 +99,7 @@ export function StatTile({
         Số lớn dùng figure tỷ lệ (không tabular-nums): tabular cho mọi chữ số bề
         rộng của '0' nên ở cỡ lớn số trông rời rạc.
       */}
-      <p className="mt-1.5 text-2xl font-semibold tracking-tight" style={{ color: valueColor }}>
+      <p className="mt-2 text-2xl font-semibold tracking-tight" style={{ color: valueColor }}>
         {formatVnd(value)}
       </p>
       {change !== null && upIsGood !== undefined && (
@@ -111,14 +111,23 @@ export function StatTile({
     </>
   );
 
+  /**
+   * Ô link nhấc lên khi hover (bóng dày hơn + viền đậm hơn), ô không link thì
+   * đứng yên: chuyển động ở đây mang nghĩa "bấm được", nên ô nào không bấm được
+   * mà cũng nhúc nhích là nói dối.
+   */
+  const shell = 'block h-full rounded-token border bg-surface p-4 shadow-card';
+
   return (
     <div className="group relative">
       {href ? (
         <Link
           href={href}
           aria-describedby={hint ? hintId : undefined}
-          className="block h-full border bg-surface p-4 transition-colors hover:bg-surface-raised"
-          style={{ borderRadius: 'var(--radius)' }}
+          className={cn(
+            shell,
+            'transition-[box-shadow,border-color] duration-150 hover:border-border-strong hover:shadow-pop',
+          )}
         >
           {body}
           {/* Nói rõ link dẫn tới đâu: tên của link nếu chỉ đọc nội dung là một
@@ -127,8 +136,7 @@ export function StatTile({
         </Link>
       ) : (
         <div
-          className="h-full border bg-surface p-4"
-          style={{ borderRadius: 'var(--radius)' }}
+          className={shell}
           // Ô không phải link vẫn phải tới được bằng bàn phím khi có chú thích,
           // nếu không thì hint chỉ tồn tại cho người dùng chuột.
           tabIndex={hint ? 0 : undefined}
@@ -147,8 +155,7 @@ export function StatTile({
         <span
           id={hintId}
           role="tooltip"
-          className="pointer-events-none absolute left-0 right-0 top-full z-20 mt-1.5 border bg-surface-raised p-3 text-sm text-ink-secondary opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-          style={{ borderRadius: 'var(--radius-sm)' }}
+          className="pointer-events-none absolute left-0 right-0 top-full z-20 mt-1.5 rounded-token-sm border bg-surface-raised p-3 text-sm text-ink-secondary opacity-0 shadow-overlay transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
         >
           {hint}
         </span>
@@ -214,6 +221,14 @@ export function TrendChart({ points }: { points: TrendPointDto[] }) {
             content={<ChartTooltip />}
             cursor={{ stroke: 'var(--axis)', strokeWidth: 1 }}
           />
+          {/*
+            `isAnimationActive={false}`: recharts mặc định vẽ đường dần trong
+            1,5 giây. Nó chạy bằng JS nên khối @media prefers-reduced-motion
+            trong globals.css KHÔNG chặn được — ai bật giảm chuyển động vẫn phải
+            xem trọn hiệu ứng đó. Nó cũng chạy lại mỗi lần khung đổi kích thước,
+            nên đường có thể đang ở giữa chừng khi người dùng đã đọc số. Đây là
+            biểu đồ tiền, hiện ngay là đúng.
+          */}
           <Line
             type="monotone"
             dataKey="income"
@@ -222,6 +237,7 @@ export function TrendChart({ points }: { points: TrendPointDto[] }) {
             strokeWidth={2}
             strokeLinejoin="round"
             strokeLinecap="round"
+            isAnimationActive={false}
             // Marker ≥8px với ring màu nền để còn đọc được khi hai đường chồng nhau
             dot={false}
             activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--surface)' }}
@@ -234,6 +250,7 @@ export function TrendChart({ points }: { points: TrendPointDto[] }) {
             strokeWidth={2}
             strokeLinejoin="round"
             strokeLinecap="round"
+            isAnimationActive={false}
             dot={false}
             activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--surface)' }}
           />
@@ -278,10 +295,7 @@ function ChartTooltip({
   const expense = payload.find((item) => item.dataKey === 'expense')?.value ?? 0;
 
   return (
-    <div
-      className="border bg-surface-raised px-3 py-2 text-sm shadow-lg"
-      style={{ borderRadius: 'var(--radius-sm)' }}
-    >
+    <div className="rounded-token-sm border bg-surface-raised px-3 py-2 text-sm shadow-overlay">
       <p className="mb-1.5 font-medium text-ink">{label}</p>
       <dl className="space-y-1 tabular">
         <TooltipRow color="var(--series-income)" label="Thu" value={income} />
@@ -413,16 +427,10 @@ export function BreakdownBars({
               <div className="mt-1.5 flex items-center gap-2">
                 {/* Track là bước nhạt của cùng hue, không phải xám — trạng thái đọc
                     được trên toàn bộ chiều dài bar */}
-                <div
-                  className="h-1.5 flex-1 overflow-hidden bg-bar-track"
-                  style={{ borderRadius: '9999px' }}
-                >
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-bar-track">
                   <div
-                    className="h-full bg-bar"
-                    style={{
-                      width: `${(item.total / max) * 100}%`,
-                      borderRadius: '9999px',
-                    }}
+                    className="h-full rounded-full bg-bar transition-[width] duration-300"
+                    style={{ width: `${(item.total / max) * 100}%` }}
                   />
                 </div>
                 <span className="w-16 shrink-0 text-right text-sm text-ink-muted tabular">
@@ -438,7 +446,7 @@ export function BreakdownBars({
             {item.href ? (
               <Link
                 href={item.href}
-                className="block px-5 py-3 transition-colors hover:bg-surface-raised"
+                className="block px-5 py-3 transition-colors duration-150 hover:bg-surface-hover"
               >
                 {row}
                 {/* Tên của link nếu chỉ đọc nội dung là "Ăn uống 4.500.000 ₫ 32,1%",
@@ -497,17 +505,16 @@ export function BudgetMeter({
 
       <div className="flex items-center gap-3">
         <div
-          className="h-2 flex-1 overflow-hidden"
-          style={{ backgroundColor: 'var(--grid)', borderRadius: '9999px' }}
+          className="h-2 flex-1 overflow-hidden rounded-full"
+          style={{ backgroundColor: 'var(--grid)' }}
         >
           <div
-            className="h-full"
+            className="h-full rounded-full transition-[width] duration-300"
             style={{
               // Kẹp thanh ở 100% để nó không tràn khỏi track, nhưng con số bên
               // dưới vẫn nói đúng đã vượt bao nhiêu.
               width: `${Math.min(ratio, 1) * 100}%`,
               backgroundColor: fillColor,
-              borderRadius: '9999px',
             }}
           />
         </div>

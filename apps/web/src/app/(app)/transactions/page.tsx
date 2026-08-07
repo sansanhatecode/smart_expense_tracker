@@ -17,7 +17,7 @@ import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
 import { useCategories } from '@/lib/queries';
-import { currentMonthRange, formatDate } from '@/lib/utils';
+import { cn, currentMonthRange, formatDate } from '@/lib/utils';
 import {
   Badge,
   Button,
@@ -29,6 +29,7 @@ import {
   Field,
   Input,
   MultiSelect,
+  PageHeader,
   Select,
   Skeleton,
   type MultiSelectOption,
@@ -120,7 +121,7 @@ const INTERNAL_LABEL: Record<InternalKind, string> = {
  */
 export default function TransactionsPage() {
   return (
-    <Suspense fallback={<Skeleton className="mx-auto h-96 max-w-6xl" />}>
+    <Suspense fallback={<Skeleton className="h-96" />}>
       <TransactionsView />
     </Suspense>
   );
@@ -334,21 +335,21 @@ function TransactionsView() {
   ];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">Giao dịch</h1>
-          <p className="mt-0.5 text-sm text-ink-secondary">
-            {transactions.data
-              ? `${transactions.data.total} giao dịch`
-              : 'Đang tải…'}
-          </p>
-        </div>
-        <Button variant="primary" size="sm" onClick={() => setShowForm((open) => !open)}>
-          {showForm ? <X aria-hidden className="size-4" /> : <Plus aria-hidden className="size-4" />}
-          {showForm ? 'Đóng' : 'Thêm giao dịch'}
-        </Button>
-      </header>
+    <div className="space-y-6">
+      <PageHeader
+        title="Giao dịch"
+        subtitle={transactions.data ? `${transactions.data.total} giao dịch` : 'Đang tải…'}
+        actions={
+          <Button variant="primary" size="sm" onClick={() => setShowForm((open) => !open)}>
+            {showForm ? (
+              <X aria-hidden className="size-4" />
+            ) : (
+              <Plus aria-hidden className="size-4" />
+            )}
+            {showForm ? 'Đóng' : 'Thêm giao dịch'}
+          </Button>
+        }
+      />
 
       {showForm && (
         <CreateTransactionForm
@@ -484,7 +485,15 @@ function TransactionsView() {
               Hàng chọn cả trang. Nằm trong cùng một Card với danh sách và ngay
               trên nó, vì "cả trang" nghĩa là đúng những dòng nhìn thấy bên dưới.
             */}
-            <div className="flex flex-wrap items-center gap-3 border-b px-4 py-3 sm:px-5">
+            {/* Thanh này đổi nền khi đã tick: lúc đó nó không còn là một dòng
+                hướng dẫn mà là chỗ chứa hành động sẽ chạy trên các dòng đang
+                chọn — và nó phải khác hẳn phần danh sách bên dưới. */}
+            <div
+              className={cn(
+                'flex flex-wrap items-center gap-3 border-b px-4 py-3 transition-colors duration-150 sm:px-5',
+                selected.length > 0 && 'bg-surface-hover',
+              )}
+            >
               <input
                 type="checkbox"
                 className="size-4 shrink-0"
@@ -530,7 +539,13 @@ function TransactionsView() {
               {transactions.data.items.map((tx) => (
                 <li
                   key={tx.id}
-                  className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5"
+                  className={cn(
+                    'flex flex-wrap items-center gap-3 px-4 py-3 transition-colors duration-150 sm:px-5',
+                    // Dòng đang tick được tô nền: thanh hành động phía trên nói
+                    // "đã chọn 12", nhưng 12 dòng nào thì chỉ ô checkbox nhỏ xíu
+                    // ở đầu dòng trả lời được — quá ít cho một nút Xoá.
+                    selected.includes(tx.id) ? 'bg-accent-soft/40' : 'hover:bg-surface-hover',
+                  )}
                 >
                   <input
                     type="checkbox"
@@ -557,13 +572,11 @@ function TransactionsView() {
                     <p className="mt-0.5 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
                       <span className="tabular">{formatDate(tx.date)}</span>
                       {tx.account && <span className="truncate">{tx.account.name}</span>}
-                      {tx.importBatchId && (
-                        <Badge className="text-[0.75rem]">từ import</Badge>
-                      )}
+                      {tx.importBatchId && <Badge size="sm">từ import</Badge>}
                       {/* Nói rõ dòng này KHÔNG nằm trong tổng thu chi, ngay tại
                           chỗ người dùng nhìn thấy số tiền của nó. */}
                       {tx.internalKind && (
-                        <Badge className="text-[0.75rem]">
+                        <Badge size="sm">
                           <Shuffle aria-hidden className="size-3" />
                           {INTERNAL_LABEL[tx.internalKind]} · ngoài thống kê
                         </Badge>

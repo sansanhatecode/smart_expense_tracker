@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { AppShell } from '@/components/app-shell';
 import { useAuth } from '@/lib/auth';
+import { LoadingScreen } from '@/components/ui';
 
 /**
  * Chặn cửa cho mọi trang trong app.
@@ -22,13 +23,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   // Chờ biết chắc rồi mới vẽ: render nội dung khi chưa xác thực xong sẽ khiến các
   // query bắn đi kèm token rỗng và nhận 401 hàng loạt.
-  if (loading || !user) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center">
-        <p className="text-sm text-ink-muted">Đang tải…</p>
-      </div>
-    );
-  }
+  if (loading || !user) return <LoadingScreen />;
 
   return <AppShell>{children}</AppShell>;
 }

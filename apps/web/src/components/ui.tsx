@@ -11,21 +11,57 @@ import { cn } from '@/lib/utils';
  * App này cần khoảng chục primitive, và mỗi cái là vài dòng — kéo về một thư
  * viện đầy đủ nghĩa là thêm dependency và một lớp API phải học, để dùng 10% của nó.
  * Tất cả style qua design token trong globals.css nên light/dark đổi ở một chỗ.
+ *
+ * Bo góc đi qua `rounded-token` / `rounded-token-sm` (Tailwind đọc từ @theme
+ * inline), không phải `style={{ borderRadius }}` viết tay: cùng một giá trị,
+ * nhưng nằm chung chỗ với các class còn lại nên đọc một lượt là thấy hết.
  */
+
+// ─── Tiêu đề trang ───────────────────────────────────────────────────────────
+
+/**
+ * Đầu trang: tên trang, một dòng ngữ cảnh, và các nút của trang đó.
+ *
+ * Gom lại một chỗ vì sáu trang đang chép lại cùng một khối markup, và mỗi lần
+ * chép là một cơ hội để lệch nhau một bậc chữ hoặc một nấc khoảng cách. Ở đây
+ * chúng nhất định giống nhau.
+ */
+export function PageHeader({
+  title,
+  subtitle,
+  actions,
+}: {
+  title: string;
+  /** Một dòng nói kỳ đang xem hoặc số lượng — không phải chỗ giải thích dài. */
+  subtitle?: React.ReactNode;
+  actions?: React.ReactNode;
+}) {
+  return (
+    <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+      <div className="min-w-0">
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">{title}</h1>
+        {subtitle && <p className="mt-1 text-sm text-ink-secondary">{subtitle}</p>}
+      </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    </header>
+  );
+}
 
 // ─── Card ────────────────────────────────────────────────────────────────────
 
+/**
+ * Nền của app (`--page`) và nền của card (`--surface`) chỉ cách nhau vài phần
+ * trăm độ sáng, nên riêng viền không đủ tách card ra khỏi trang. Bóng đổ gánh
+ * phần đó ở light mode; ở dark mode nó gần như vô hình và bậc bề mặt gánh thay
+ * — cả hai đã khai sẵn theo mode trong globals.css.
+ */
 export function Card({
   className,
   children,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div
-      className={cn('border bg-surface', className)}
-      style={{ borderRadius: 'var(--radius)' }}
-      {...props}
-    >
+    <div className={cn('rounded-token border bg-surface shadow-card', className)} {...props}>
       {children}
     </div>
   );
@@ -55,12 +91,23 @@ export function CardHeader({
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
+/**
+ * Hover đổi MÀU chứ không đổi độ mờ.
+ *
+ * `opacity` từng là cách làm ở đây, và nó sai theo hai đường: nút mờ đi để lộ
+ * nền phía sau nên ra màu khác nhau tuỳ chỗ đặt, và trên nền sáng thì nút nhạt
+ * đi trông y hệt nút đang disabled — đúng tín hiệu ngược với thứ vừa hover.
+ * `--accent-hover`/`--accent-active` là bậc màu thật, khai riêng cho từng mode.
+ */
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: 'bg-accent text-accent-ink hover:opacity-90',
-  secondary: 'border bg-surface text-ink hover:bg-surface-raised',
-  ghost: 'text-ink-secondary hover:bg-surface-raised hover:text-ink',
-  danger: 'text-critical hover:bg-critical/10',
+  primary: 'bg-accent text-accent-ink shadow-card hover:bg-accent-hover active:bg-accent-active',
+  secondary: 'border bg-surface text-ink hover:border-border-strong hover:bg-surface-hover',
+  ghost: 'text-ink-secondary hover:bg-surface-hover hover:text-ink',
+  danger: 'text-critical hover:bg-critical/10 active:bg-critical/15',
 };
+
+const BUTTON_BASE =
+  'inline-flex items-center justify-center gap-2 rounded-token-sm font-medium transition-colors duration-150';
 
 export function Button({
   variant = 'secondary',
@@ -78,13 +125,12 @@ export function Button({
   return (
     <button
       className={cn(
-        'inline-flex items-center justify-center gap-2 font-medium transition-opacity',
+        BUTTON_BASE,
         'disabled:pointer-events-none disabled:opacity-50',
         size === 'sm' ? 'h-8 px-3 text-sm' : 'h-10 px-4 text-sm',
         BUTTON_VARIANTS[variant],
         className,
       )}
-      style={{ borderRadius: 'var(--radius-sm)' }}
       disabled={disabled || loading}
       {...props}
     >
@@ -118,12 +164,11 @@ export function ButtonLink({
     <Link
       href={href}
       className={cn(
-        'inline-flex items-center justify-center gap-2 font-medium transition-opacity',
+        BUTTON_BASE,
         size === 'sm' ? 'h-8 px-3 text-sm' : 'h-10 px-4 text-sm',
         BUTTON_VARIANTS[variant],
         className,
       )}
-      style={{ borderRadius: 'var(--radius-sm)' }}
     >
       {children}
     </Link>
@@ -170,6 +215,17 @@ export function Field({
   );
 }
 
+/**
+ * Class dùng chung cho mọi ô nhập.
+ *
+ * Viền đậm lên khi hover và chuyển sang màu nhấn khi focus — hai tín hiệu khác
+ * nhau cho hai việc khác nhau ("bấm được đây" và "đang gõ ở đây"). Vòng focus
+ * của trình duyệt vẫn giữ nguyên bên ngoài (xem globals.css): màu viền một mình
+ * không đủ cho người không phân biệt được nó.
+ */
+const CONTROL_BASE =
+  'w-full rounded-token-sm border bg-surface text-sm text-ink transition-colors duration-150 placeholder:text-ink-muted hover:border-border-strong focus:border-accent disabled:cursor-not-allowed disabled:opacity-60';
+
 export function Input({
   className,
   invalid,
@@ -177,12 +233,7 @@ export function Input({
 }: React.InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }) {
   return (
     <input
-      className={cn(
-        'h-10 w-full border bg-surface px-3 text-sm text-ink placeholder:text-ink-muted',
-        invalid && 'border-critical',
-        className,
-      )}
-      style={{ borderRadius: 'var(--radius-sm)' }}
+      className={cn(CONTROL_BASE, 'h-10 px-3', invalid && 'border-critical', className)}
       aria-invalid={invalid || undefined}
       {...props}
     />
@@ -198,12 +249,7 @@ export function Textarea({
   return (
     <textarea
       rows={rows}
-      className={cn(
-        'w-full border bg-surface px-3 py-2 text-sm text-ink placeholder:text-ink-muted',
-        invalid && 'border-critical',
-        className,
-      )}
-      style={{ borderRadius: 'var(--radius-sm)' }}
+      className={cn(CONTROL_BASE, 'px-3 py-2', invalid && 'border-critical', className)}
       aria-invalid={invalid || undefined}
       {...props}
     />
@@ -217,12 +263,10 @@ export function Select({
 }: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
-      className={cn(
-        'h-10 w-full appearance-none border bg-surface px-3 pr-8 text-sm text-ink',
-        className,
-      )}
+      className={cn(CONTROL_BASE, 'h-10 appearance-none px-3 pr-8', className)}
       style={{
-        borderRadius: 'var(--radius-sm)',
+        // Mũi tên vẽ bằng SVG inline chứ không phải một icon React: `<select>`
+        // không nhận con nào ngoài `<option>`, nên nó phải là ảnh nền.
         backgroundImage:
           "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23898781' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
         backgroundRepeat: 'no-repeat',
@@ -321,27 +365,33 @@ export function MultiSelect({
         aria-haspopup="true"
         onClick={() => setOpen((current) => !current)}
         className={cn(
-          'flex h-10 w-full items-center gap-2 border bg-surface px-3 text-left text-sm',
+          'flex h-10 w-full items-center gap-2 rounded-token-sm border bg-surface px-3 text-left text-sm transition-colors duration-150 hover:border-border-strong',
+          // Panel đang mở thì nút giữ viền nhấn: nó và panel là một khối, và khi
+          // panel che mất thứ bên dưới thì phải thấy được nó mọc ra từ đâu.
+          open && 'border-accent',
           chosen.length === 0 ? 'text-ink-muted' : 'text-ink',
         )}
-        style={{ borderRadius: 'var(--radius-sm)' }}
       >
         <span className="min-w-0 flex-1 truncate">{summary}</span>
-        <Icons.ChevronDown aria-hidden className="size-4 shrink-0 text-ink-muted" />
+        <Icons.ChevronDown
+          aria-hidden
+          className={cn(
+            'size-4 shrink-0 text-ink-muted transition-transform duration-150',
+            open && 'rotate-180',
+          )}
+        />
       </button>
 
       {open && (
         <div
           role="group"
           aria-label={label}
-          className="absolute left-0 right-0 z-30 mt-1 max-h-64 overflow-y-auto border bg-surface-raised p-1 shadow-lg"
-          style={{ borderRadius: 'var(--radius-sm)' }}
+          className="scroll-slim absolute left-0 right-0 z-30 mt-1 max-h-64 overflow-y-auto rounded-token-sm border bg-surface-raised p-1 shadow-overlay"
         >
           {options.map((option) => (
             <label
               key={option.value}
-              className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-sm text-ink hover:bg-surface"
-              style={{ borderRadius: 'var(--radius-sm)' }}
+              className="flex cursor-pointer items-center gap-2 rounded-token-sm px-2 py-1.5 text-sm text-ink transition-colors hover:bg-surface-hover"
             >
               <input
                 type="checkbox"
@@ -358,7 +408,7 @@ export function MultiSelect({
             <button
               type="button"
               onClick={() => onChange([])}
-              className="mt-1 w-full border-t px-2 py-1.5 text-left text-sm text-ink-secondary hover:text-ink"
+              className="mt-1 w-full border-t px-2 py-1.5 text-left text-sm text-ink-secondary transition-colors hover:text-ink"
             >
               Bỏ chọn hết
             </button>
@@ -370,6 +420,16 @@ export function MultiSelect({
 }
 
 // ─── Hộp thoại ───────────────────────────────────────────────────────────────
+
+/**
+ * Class chung của hai hộp thoại bên dưới.
+ *
+ * Nền mờ phía sau (`backdrop-blur`) không phải để đẹp: hộp thoại trong app này
+ * mở đè lên bảng số liệu dày đặc, và một lớp mờ đơn thuần vẫn để chữ bên dưới
+ * đọc được lờ mờ, tranh mất chỗ với đúng câu hỏi đang cần trả lời.
+ */
+const DIALOG_BASE =
+  'm-auto w-[calc(100%-2rem)] rounded-token border bg-surface p-5 shadow-overlay backdrop:bg-ink/50 backdrop:backdrop-blur-sm';
 
 /**
  * Hộp thoại rỗng để nhét nội dung bất kỳ — form, thông tin, hướng dẫn.
@@ -416,8 +476,7 @@ export function Modal({
         event.preventDefault();
         onClose();
       }}
-      className="m-auto w-[calc(100%-2rem)] max-w-lg border bg-surface p-5 shadow-lg backdrop:bg-ink/40"
-      style={{ borderRadius: 'var(--radius)' }}
+      className={cn(DIALOG_BASE, 'max-w-lg')}
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
@@ -500,14 +559,23 @@ export function ConfirmDialog({
         event.preventDefault();
         if (!busy) onCancel();
       }}
-      className="m-auto w-[calc(100%-2rem)] max-w-md border bg-surface p-5 shadow-lg backdrop:bg-ink/40"
-      style={{ borderRadius: 'var(--radius)' }}
+      className={cn(DIALOG_BASE, 'max-w-md')}
     >
-      <h2 id={titleId} className="text-base font-semibold text-ink">
-        {title}
-      </h2>
+      <div className="flex items-start gap-3">
+        {/*
+          Icon cảnh báo đứng cạnh tiêu đề: hộp này chỉ mở cho hành động phá huỷ,
+          và tín hiệu đó phải đọc được trước cả khi đọc chữ. Màu một mình không
+          làm được việc đó — nên là icon, và nó nằm trên nền dịu để không hét.
+        */}
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-token-sm bg-critical/10">
+          <Icons.TriangleAlert aria-hidden className="size-4.5 text-critical" />
+        </span>
+        <h2 id={titleId} className="mt-1.5 text-base font-semibold text-ink">
+          {title}
+        </h2>
+      </div>
 
-      {children && <div className="mt-2 space-y-1 text-sm text-ink-secondary">{children}</div>}
+      {children && <div className="mt-3 space-y-1 text-sm text-ink-secondary">{children}</div>}
 
       {error && (
         <p className="mt-3 flex items-start gap-1.5 text-sm text-critical" role="alert">
@@ -564,20 +632,28 @@ export function StatusBadge({
   );
 }
 
+/**
+ * Nhãn phụ trên một dòng danh sách ("từ import", "chưa phân loại").
+ *
+ * `size="sm"` là cỡ dùng khi badge đứng chung hàng với chữ meta của dòng: bằng
+ * cỡ chữ đó thì nó tranh chỗ với mô tả giao dịch, mà mô tả mới là thứ cần đọc.
+ */
 export function Badge({
+  size = 'md',
   className,
   children,
 }: {
+  size?: 'sm' | 'md';
   className?: string;
   children: React.ReactNode;
 }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 border px-2 py-0.5 text-sm text-ink-secondary',
+        'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-ink-secondary',
+        size === 'sm' ? 'text-xs' : 'text-sm',
         className,
       )}
-      style={{ borderRadius: '9999px' }}
     >
       {children}
     </span>
@@ -606,8 +682,13 @@ export function CategoryIcon({
 
   return (
     <span
-      className={cn('inline-flex size-8 shrink-0 items-center justify-center', className)}
-      style={{ backgroundColor: `${color}1f`, color, borderRadius: 'var(--radius-sm)' }}
+      className={cn(
+        'inline-flex size-8 shrink-0 items-center justify-center rounded-token-sm',
+        className,
+      )}
+      // Nền là chính màu danh mục ở 12% — không phải một màu xám cố định: ở 12%
+      // nó vẫn đủ nhạt để icon đọc được ở cả hai mode, mà vẫn nhắc lại được màu.
+      style={{ backgroundColor: `${color}1f`, color }}
     >
       <Icon className="size-4" />
     </span>
@@ -629,7 +710,11 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
-      <Icon className="size-8 text-ink-muted" />
+      {/* Icon trong một ô nền dịu chứ không thả trôi: khối rỗng cần một điểm
+          neo, nếu không cả vùng trông như trang chưa tải xong. */}
+      <span className="flex size-11 items-center justify-center rounded-token bg-surface-hover">
+        <Icon className="size-5 text-ink-muted" />
+      </span>
       <div className="space-y-1">
         <p className="font-medium text-ink">{title}</p>
         {description && (
@@ -641,12 +726,26 @@ export function EmptyState({
   );
 }
 
+/** Khối chờ. Hình dạng và chuyển động nằm ở class `.skeleton` trong globals.css. */
 export function Skeleton({ className }: { className?: string }) {
+  return <div className={cn('skeleton rounded-token-sm', className)} />;
+}
+
+/**
+ * Màn hình chờ chiếm cả khung nhìn — dùng cho lúc chưa biết đã đăng nhập hay chưa.
+ *
+ * Không dùng Skeleton ở đây: skeleton hứa hẹn nội dung sắp hiện ra đúng hình
+ * dạng đó, mà lúc này còn chưa biết sẽ đi tới dashboard hay trang đăng nhập.
+ */
+export function LoadingScreen({ label = 'Đang tải…' }: { label?: string }) {
   return (
     <div
-      className={cn('animate-pulse bg-surface-raised', className)}
-      style={{ borderRadius: 'var(--radius-sm)' }}
-    />
+      role="status"
+      className="flex min-h-dvh flex-col items-center justify-center gap-3 text-ink-muted"
+    >
+      <Icons.Loader2 aria-hidden className="size-6 animate-spin" />
+      <p className="text-sm">{label}</p>
+    </div>
   );
 }
 
@@ -661,6 +760,7 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
       action={
         onRetry && (
           <Button size="sm" onClick={onRetry}>
+            <Icons.RotateCw aria-hidden className="size-4" />
             Thử lại
           </Button>
         )
